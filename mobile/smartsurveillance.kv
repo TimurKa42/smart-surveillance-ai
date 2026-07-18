@@ -1,0 +1,287 @@
+#:kivy 2.3.0
+
+# ---------------------------------------------------------------
+# Кольорова палітра (мінімалістична темна тема)
+# ---------------------------------------------------------------
+#   фон екрану       - #121212
+#   картки/поля      - #1E1E22
+#   акцент (синій)   - #2E86DE
+#   акцент (натиск)  - #1B5FA8
+#   текст основний   - #F2F2F2
+#   текст другорядний- #9AA0A6
+# ---------------------------------------------------------------
+
+<RoundedLabel@Label>:
+    color: 0.95, 0.95, 0.95, 1
+    font_size: "16sp"
+
+<SubtleLabel@Label>:
+    color: 0.6, 0.63, 0.65, 1
+    font_size: "13sp"
+
+<AccentButton@Button>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    color: 1, 1, 1, 1
+    font_size: "16sp"
+    bold: True
+    canvas.before:
+        Color:
+            rgba: (0.106, 0.373, 0.655, 1) if self.state == "normal" else (0.106, 0.298, 0.525, 1)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [14]
+
+<GhostButton@Button>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    color: 0.75, 0.78, 0.8, 1
+    font_size: "14sp"
+    canvas.before:
+        Color:
+            rgba: 0.16, 0.16, 0.19, 1
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [12]
+
+<ModelButton>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    color: (1, 1, 1, 1) if self.is_selected else (0.75, 0.78, 0.8, 1)
+    font_size: "14sp"
+    bold: self.is_selected
+    canvas.before:
+        Color:
+            rgba: (0.106, 0.373, 0.655, 1) if self.is_selected else (0.18, 0.18, 0.21, 1)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [12]
+
+<ReportItemButton>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    color: 1, 1, 1, 1
+    text_size: self.width - 20, None
+    halign: "left"
+    valign: "middle"
+    padding: [12, 8]
+    font_size: "13sp"
+    canvas.before:
+        Color:
+            rgba: (0.106, 0.373, 0.655, 1) if self.is_selected else (0.16, 0.16, 0.19, 1)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [10]
+
+
+<SetupScreen>:
+    api_key_input: api_key_input
+
+    BoxLayout:
+        orientation: "vertical"
+        padding: [32, 60, 32, 40]
+        spacing: 18
+
+        Widget:
+            size_hint_y: 0.6
+
+        RoundedLabel:
+            text: app.loc.t("api_key_screen_title")
+            font_size: "24sp"
+            bold: True
+            size_hint_y: None
+            height: 40
+
+        SubtleLabel:
+            text: app.loc.t("api_key_screen_subtitle")
+            size_hint_y: None
+            height: 30
+
+        Widget:
+            size_hint_y: None
+            height: 12
+
+        TextInput:
+            id: api_key_input
+            hint_text: app.loc.t("api_key_placeholder")
+            multiline: False
+            password: True
+            size_hint_y: None
+            height: 52
+            background_color: 0.12, 0.12, 0.14, 1
+            foreground_color: 1, 1, 1, 1
+            hint_text_color: 0.5, 0.5, 0.5, 1
+            cursor_color: 1, 1, 1, 1
+            padding: [16, 14]
+
+        GhostButton:
+            text: app.loc.t("api_key_no_key_hint")
+            size_hint_y: None
+            height: 40
+            on_release: root.open_instructions()
+
+        RoundedLabel:
+            text: root.error_text
+            color: 0.9, 0.35, 0.35, 1
+            font_size: "13sp"
+            size_hint_y: None
+            height: 24
+
+        Widget:
+            size_hint_y: None
+            height: 8
+
+        AccentButton:
+            text: app.loc.t("api_key_submit")
+            size_hint_y: None
+            height: 52
+            on_release: root.submit_key()
+
+        Widget:
+            size_hint_y: 1
+
+
+<MainScreen>:
+    search_label: search_label
+    choose_video_btn: choose_video_btn
+    file_label: file_label
+    prompt_input: prompt_input
+    word_count_label: word_count_label
+    start_btn: start_btn
+    model_label: model_label
+    model_buttons: model_buttons
+    status_label: status_label
+    report_list: report_list
+    description_label: description_label
+    screenshot_image: screenshot_image
+
+    BoxLayout:
+        orientation: "vertical"
+        padding: [16, 16, 16, 8]
+        spacing: 10
+
+        # ---- вибір відео ----
+        BoxLayout:
+            size_hint_y: None
+            height: 48
+            spacing: 10
+
+            AccentButton:
+                id: choose_video_btn
+                size_hint_x: 0.4
+                on_release: root.choose_video()
+
+            RoundedLabel:
+                id: file_label
+                color: 0.7, 0.73, 0.76, 1
+                font_size: "13sp"
+                text_size: self.width, None
+                halign: "left"
+                valign: "middle"
+
+        # ---- поле запиту ----
+        BoxLayout:
+            size_hint_y: None
+            height: 22
+
+            RoundedLabel:
+                id: search_label
+                font_size: "13sp"
+                halign: "left"
+                text_size: self.width, None
+
+            SubtleLabel:
+                id: word_count_label
+                size_hint_x: None
+                width: 70
+                halign: "right"
+                text_size: self.width, None
+
+        TextInput:
+            id: prompt_input
+            size_hint_y: None
+            height: 70
+            background_color: 0.12, 0.12, 0.14, 1
+            foreground_color: 1, 1, 1, 1
+            cursor_color: 1, 1, 1, 1
+            padding: [14, 12]
+            on_text: root.update_word_count(self.text)
+
+        AccentButton:
+            id: start_btn
+            size_hint_y: None
+            height: 48
+            on_release: root.start_analysis()
+
+        # ---- вибір моделі ----
+        BoxLayout:
+            size_hint_y: None
+            height: 40
+            spacing: 8
+
+            RoundedLabel:
+                id: model_label
+                font_size: "13sp"
+                size_hint_x: 0.45
+                halign: "left"
+                text_size: self.width, None
+
+            BoxLayout:
+                id: model_buttons
+                spacing: 6
+
+                ModelButton:
+                    text: "3.1 Flash-Lite"
+                    model_name: "gemini-3.1-flash-lite"
+                    on_release: root.select_model(self.model_name)
+
+                ModelButton:
+                    text: "3.5 Flash"
+                    model_name: "gemini-3.5-flash"
+                    on_release: root.select_model(self.model_name)
+
+        SubtleLabel:
+            id: status_label
+            size_hint_y: None
+            height: 24
+            halign: "left"
+            text_size: self.width, None
+
+        # ---- звіт: список моментів + опис + скріншот ----
+        BoxLayout:
+            spacing: 10
+
+            ScrollView:
+                size_hint_x: 0.42
+                BoxLayout:
+                    id: report_list
+                    orientation: "vertical"
+                    spacing: 6
+                    size_hint_y: None
+                    height: self.minimum_height
+                    padding: [0, 0, 6, 0]
+
+            BoxLayout:
+                orientation: "vertical"
+                spacing: 6
+
+                RoundedLabel:
+                    id: description_label
+                    size_hint_y: None
+                    height: 46
+                    font_size: "13sp"
+                    halign: "left"
+                    valign: "top"
+                    text_size: self.width, None
+
+                Image:
+                    id: screenshot_image
+                    fit_mode: "contain"
