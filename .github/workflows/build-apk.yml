@@ -26,7 +26,7 @@ jobs:
       - name: Install Buildozer and Cython
         run: pip install --upgrade buildozer cython==0.29.36
       - name: Set JAVA_HOME to 17
-        run: echo "JAVA_HOME=${{ env.JAVA_HOME_17_X64 }}" >> $GITHUB_ENV
+        run: echo "JAVA_HOME=$JAVA_HOME_17_X64" >> $GITHUB_ENV
       - name: Build APK
         working-directory: mobile
         # Добавлено yes | для автоматического принятия лицензий Android SDK
