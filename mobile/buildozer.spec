@@ -19,7 +19,7 @@ icon.filename = %(source.dir)s/icon.png
 
 android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 
-android.api = 34
+android.api = 33
 android.minapi = 24
 android.ndk = 25b
 android.archs = arm64-v8a
