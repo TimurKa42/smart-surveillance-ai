@@ -1,23 +1,18 @@
 name: Build Android APK
-
 on:
   workflow_dispatch:
   push:
     paths:
       - "mobile/**"
-
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -28,15 +23,14 @@ jobs:
             zlib1g-dev libncurses5-dev libtinfo5 \
             autoconf automake libtool pkg-config \
             zip
-
       - name: Install Buildozer and Cython
         run: pip install --upgrade buildozer cython==0.29.36
-
+      - name: Set JAVA_HOME to 17
+        run: echo "JAVA_HOME=${{ env.JAVA_HOME_17_X64 }}" >> $GITHUB_ENV
       - name: Build APK
         working-directory: mobile
         # Добавлено yes | для автоматического принятия лицензий Android SDK
         run: yes | buildozer -v android debug
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
