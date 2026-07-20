@@ -1,0 +1,449 @@
+#:kivy 2.3.0
+#:import animate_press main.animate_press
+#:import animate_release main.animate_release
+
+# ---------------------------------------------------------------
+# Кольори більше НЕ хардкодяться тут - усе береться з app.palette
+# (theme.py), яка перемикається між світлою/темною/авто темами.
+# ---------------------------------------------------------------
+
+<RoundedLabel@Label>:
+    color: app.palette["text"]
+    font_size: "16sp"
+
+<SubtleLabel@Label>:
+    color: app.palette["text_muted"]
+    font_size: "13sp"
+
+
+<AccentButton@Button>:
+    scale: 1.0
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    color: 1, 1, 1, 1
+    font_size: "16sp"
+    bold: True
+    on_press: animate_press(self)
+    on_release: animate_release(self)
+    canvas.before:
+        PushMatrix
+        Scale:
+            origin: self.center
+            x: self.scale
+            y: self.scale
+        Color:
+            rgba: app.palette["accent"] if self.state == "normal" else app.palette["accent_pressed"]
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(14)]
+    canvas.after:
+        PopMatrix
+
+
+<GhostButton@Button>:
+    scale: 1.0
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    color: app.palette["text_muted"]
+    font_size: "14sp"
+    on_press: animate_press(self)
+    on_release: animate_release(self)
+    canvas.before:
+        PushMatrix
+        Scale:
+            origin: self.center
+            x: self.scale
+            y: self.scale
+        Color:
+            rgba: app.palette["surface_alt"]
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(12)]
+    canvas.after:
+        PopMatrix
+
+
+<ModelButton>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    color: (1, 1, 1, 1) if self.is_selected else app.palette["text_muted"]
+    font_size: "14sp"
+    bold: self.is_selected
+    on_press: animate_press(self)
+    on_release: animate_release(self)
+    canvas.before:
+        PushMatrix
+        Scale:
+            origin: self.center
+            x: self.scale
+            y: self.scale
+        Color:
+            rgba: app.palette["accent"] if self.is_selected else app.palette["surface_alt"]
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(12)]
+    canvas.after:
+        PopMatrix
+
+
+<ReportItemButton>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    color: 1, 1, 1, 1
+    text_size: self.width - dp(20), None
+    halign: "left"
+    valign: "middle"
+    padding: [dp(12), dp(8)]
+    font_size: "13sp"
+    on_press: animate_press(self)
+    on_release: animate_release(self)
+    canvas.before:
+        PushMatrix
+        Scale:
+            origin: self.center
+            x: self.scale
+            y: self.scale
+        Color:
+            rgba: app.palette["accent"] if self.is_selected else app.palette["card"]
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(10)]
+    canvas.after:
+        PopMatrix
+
+
+<ThemeChipButton>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    color: (1, 1, 1, 1) if self.is_selected else app.palette["text_muted"]
+    font_size: "12sp"
+    bold: self.is_selected
+    padding: [dp(10), 0]
+    on_press: animate_press(self)
+    on_release: animate_release(self)
+    canvas.before:
+        PushMatrix
+        Scale:
+            origin: self.center
+            x: self.scale
+            y: self.scale
+        Color:
+            rgba: app.palette["accent"] if self.is_selected else app.palette["surface_alt"]
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(9)]
+    canvas.after:
+        PopMatrix
+
+
+# ---------------------------------------------------------------
+# Верхня панель: перемикач теми і мови. Спільна для обох екранів.
+# ---------------------------------------------------------------
+<TopBar@BoxLayout>:
+    size_hint_y: None
+    height: dp(34)
+    spacing: dp(6)
+
+    SubtleLabel:
+        text: app.language and app.t("theme_label")
+        size_hint_x: None
+        width: self.texture_size[0] + dp(4)
+        font_size: "11sp"
+
+    ThemeChipButton:
+        text: app.language and app.t("theme_auto")
+        is_selected: app.theme_name == "auto"
+        on_release: app.set_theme("auto")
+
+    ThemeChipButton:
+        text: app.language and app.t("theme_light")
+        is_selected: app.theme_name == "light"
+        on_release: app.set_theme("light")
+
+    ThemeChipButton:
+        text: app.language and app.t("theme_dark")
+        is_selected: app.theme_name == "dark"
+        on_release: app.set_theme("dark")
+
+    Widget:
+        size_hint_x: 1
+
+    SubtleLabel:
+        text: app.language and app.t("language_label")
+        size_hint_x: None
+        width: self.texture_size[0] + dp(4)
+        font_size: "11sp"
+
+    ThemeChipButton:
+        text: "UA"
+        size_hint_x: None
+        width: dp(40)
+        is_selected: app.language == "ua"
+        on_release: app.set_language("ua")
+
+    ThemeChipButton:
+        text: "EN"
+        size_hint_x: None
+        width: dp(40)
+        is_selected: app.language == "en"
+        on_release: app.set_language("en")
+
+
+<SetupScreen>:
+    api_key_input: api_key_input
+
+    BoxLayout:
+        orientation: "vertical"
+        padding: [dp(24) + app.safe_left, dp(16) + app.safe_top, dp(24) + app.safe_right, dp(24) + app.safe_bottom]
+        spacing: dp(16)
+        canvas.before:
+            Color:
+                rgba: app.palette["bg"]
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+        TopBar
+
+        Widget:
+            size_hint_y: 0.5
+
+        RoundedLabel:
+            text: app.language and app.t("api_key_screen_title")
+            font_size: "24sp"
+            bold: True
+            size_hint_y: None
+            height: self.texture_size[1]
+            text_size: self.width, None
+            halign: "center"
+
+        SubtleLabel:
+            text: app.language and app.t("api_key_screen_subtitle")
+            size_hint_y: None
+            height: dp(30)
+            halign: "center"
+            text_size: self.width, None
+
+        Widget:
+            size_hint_y: None
+            height: dp(12)
+
+        TextInput:
+            id: api_key_input
+            hint_text: app.language and app.t("api_key_placeholder")
+            multiline: False
+            password: True
+            size_hint_y: None
+            height: dp(52)
+            background_color: app.palette["surface"]
+            foreground_color: app.palette["text"]
+            hint_text_color: app.palette["text_muted"]
+            cursor_color: app.palette["text"]
+            padding: [dp(16), dp(14)]
+
+        GhostButton:
+            text: app.language and app.t("api_key_no_key_hint")
+            size_hint_y: None
+            height: dp(40)
+            on_release: root.open_instructions()
+
+        RoundedLabel:
+            text: root.error_text
+            color: app.palette["danger"]
+            font_size: "13sp"
+            size_hint_y: None
+            height: dp(24)
+
+        Widget:
+            size_hint_y: None
+            height: dp(8)
+
+        AccentButton:
+            text: app.language and app.t("api_key_submit")
+            size_hint_y: None
+            height: dp(52)
+            on_release: root.submit_key()
+
+        Widget:
+            size_hint_y: 1
+
+
+<MainScreen>:
+    choose_video_btn: choose_video_btn
+    file_label: file_label
+    prompt_input: prompt_input
+    word_count_label: word_count_label
+    start_btn: start_btn
+    model_label: model_label
+    model_buttons: model_buttons
+    clear_btn: clear_btn
+    status_label: status_label
+    report_list: report_list
+    description_label: description_label
+    screenshot_image: screenshot_image
+
+    BoxLayout:
+        orientation: "vertical"
+        padding: [dp(14) + app.safe_left, dp(10) + app.safe_top, dp(14) + app.safe_right, dp(8) + app.safe_bottom]
+        spacing: dp(8)
+        canvas.before:
+            Color:
+                rgba: app.palette["bg"]
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+        TopBar
+
+        # ---- вибір відео + очистити ----
+        BoxLayout:
+            size_hint_y: None
+            height: dp(44) if not app.is_landscape else dp(38)
+            spacing: dp(8)
+
+            AccentButton:
+                id: choose_video_btn
+                text: app.language and app.t("choose_video")
+                size_hint_x: 0.34
+                on_release: root.choose_video()
+
+            RoundedLabel:
+                id: file_label
+                color: app.palette["text_muted"]
+                font_size: "13sp"
+                text_size: self.width, None
+                halign: "left"
+                valign: "middle"
+                shorten: True
+                shorten_from: "left"
+
+            GhostButton:
+                id: clear_btn
+                text: app.language and app.t("clear_all")
+                size_hint_x: None
+                width: dp(90)
+                font_size: "12sp"
+                on_release: root.clear_all()
+
+        # ---- поле запиту ----
+        BoxLayout:
+            size_hint_y: None
+            height: dp(20)
+
+            RoundedLabel:
+                text: app.language and app.t("search_prompt_label")
+                font_size: "12sp"
+                halign: "left"
+                text_size: self.width, None
+
+            SubtleLabel:
+                id: word_count_label
+                size_hint_x: None
+                width: dp(64)
+                font_size: "11sp"
+                halign: "right"
+                text_size: self.width, None
+
+        TextInput:
+            id: prompt_input
+            size_hint_y: None
+            height: dp(38) if app.is_landscape else dp(64)
+            background_color: app.palette["surface"]
+            foreground_color: app.palette["text"]
+            cursor_color: app.palette["text"]
+            padding: [dp(14), dp(10)]
+            on_text: root.update_word_count(self.text)
+
+        AccentButton:
+            id: start_btn
+            text: app.language and app.t("start_analysis")
+            size_hint_y: None
+            height: dp(44) if app.is_landscape else dp(48)
+
+            on_release: root.start_analysis()
+
+        # ---- вибір моделі ----
+        BoxLayout:
+            size_hint_y: None
+            height: dp(36)
+            spacing: dp(8)
+
+            RoundedLabel:
+                id: model_label
+                text: app.language and app.t("choose_model_label")
+                font_size: "12sp"
+                size_hint_x: 0.4
+                halign: "left"
+                text_size: self.width, None
+
+            BoxLayout:
+                id: model_buttons
+                spacing: dp(6)
+
+                ModelButton:
+                    text: "3.1 Flash-Lite"
+                    model_name: "gemini-3.1-flash-lite"
+                    on_release: root.select_model(self.model_name)
+
+                ModelButton:
+                    text: "3.5 Flash"
+                    model_name: "gemini-3.5-flash"
+                    on_release: root.select_model(self.model_name)
+
+        SubtleLabel:
+            id: status_label
+            size_hint_y: None
+            height: dp(20)
+            font_size: "12sp"
+            halign: "left"
+            text_size: self.width, None
+
+        # ---- звіт: список моментів + опис + скріншот ----
+        BoxLayout:
+            spacing: dp(10)
+            orientation: "horizontal"
+
+            ScrollView:
+                size_hint_x: 0.4 if not app.is_landscape else 0.3
+                do_scroll_x: False
+                BoxLayout:
+                    id: report_list
+                    orientation: "vertical"
+                    spacing: dp(6)
+                    size_hint_y: None
+                    height: self.minimum_height
+                    padding: [0, 0, dp(6), 0]
+
+            BoxLayout:
+                orientation: "vertical"
+                spacing: dp(6)
+
+                RoundedLabel:
+                    id: description_label
+                    size_hint_y: None
+                    height: dp(40)
+                    font_size: "13sp"
+                    halign: "left"
+                    valign: "top"
+                    text_size: self.width, None
+
+                Image:
+                    id: screenshot_image
+                    fit_mode: "contain"
+                    canvas.before:
+                        Color:
+                            rgba: app.palette["surface"]
+                        RoundedRectangle:
+                            pos: self.pos
+                            size: self.size
+                            radius: [dp(10)]
