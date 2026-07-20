@@ -17,7 +17,7 @@ fullscreen = 0
 
 icon.filename = %(source.dir)s/icon.png
 
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE
 
 android.api = 35
 android.minapi = 24
