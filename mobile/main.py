@@ -3,32 +3,37 @@ main.py (мобільна версія на Kivy)
 
 Два екрани:
 1) SetupScreen - показується, поки в застосунку ще нема збереженого
-   API-ключа Gemini. Поле вводу + посилання "немає ключа?" + кнопка
-   "Зберегти і продовжити".
+   API-ключа Gemini.
 2) MainScreen - сам застосунок: вибір відео, текстовий запит, вибір
-   моделі, аналіз, звіт зі скріншотами. Логіка (нарізка відео,
-   звернення до Gemini) винесена в video_tools.py і gemini_tools.py -
-   так само, як і в десктопній версії.
+   моделі, аналіз, звіт зі скріншотами.
 
-Стиль і кольори винесені в smartsurveillance.kv (Kivy сам підвантажує
-цей файл, бо він називається так само, як App-клас без суфікса "App").
+Порівняно з першою версією тут додано:
+- перемикач теми (авто/світла/темна) і мови (UA/EN), як у desktop-версії,
+  зі збереженням вибору між запусками (settings_store.py);
+- врахування "вирізів" екрана (камера, статус-бар, жести) через нативний
+  Android API - без цього кнопки під статус-баром неможливо натиснути;
+- реакція на поворот екрана (portrait/landscape) - деякі елементи
+  стають компактнішими в альбомній орієнтації, щоб усе влізало;
+- легкі анімації натискань кнопок і плавний перехід між екранами.
 """
 import os
 import threading
 import webbrowser
 
+from kivy.animation import Animation
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.properties import StringProperty, BooleanProperty
-from kivy.uix.screenmanager import Screen, ScreenManager, NoTransition
-from kivy.uix.image import Image
+from kivy.metrics import dp
+from kivy.properties import BooleanProperty, DictProperty, NumericProperty, StringProperty
+from kivy.uix.screenmanager import FadeTransition, Screen, ScreenManager
 from kivy.uix.button import Button
-from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.utils import platform
 
 import config
+import settings_store
+import theme
 from localization import Localization
 from video_tools import extract_frames, grab_screenshot, format_time
 import gemini_tools
@@ -45,12 +50,25 @@ MODEL_OPTIONS = [
 ]
 
 
+# ---------------------------------------------------------------------
+# Дрібні "приємні" анімації натискань - винесені сюди, щоб .kv міг
+# викликати їх напряму (#:import у kv), без дублювання Animation(...)
+# у кожному правилі кнопки.
+# ---------------------------------------------------------------------
+def animate_press(widget):
+    Animation.cancel_all(widget, "scale")
+    Animation(scale=0.96, duration=0.08, t="out_quad").start(widget)
+
+
+def animate_release(widget):
+    Animation.cancel_all(widget, "scale")
+    Animation(scale=1.0, duration=0.15, t="out_back").start(widget)
+
+
 def open_url(url):
     """
     Відкриває посилання в браузері. На звичайному комп'ютері спрацює
-    звичайний webbrowser.open(). На Android немає системного виклику
-    "відкрити URL" через webbrowser - там потрібно попросити саму
-    систему запустити намір (Intent) на перегляд посилання.
+    звичайний webbrowser.open(). На Android - через системний Intent.
     """
     if platform == "android":
         try:
@@ -64,7 +82,7 @@ def open_url(url):
             current_activity = cast("android.app.Activity", PythonActivity.mActivity)
             current_activity.startActivity(intent)
         except Exception:
-            pass  # якщо щось пішло не так - просто не відкриваємо, застосунок не має падати
+            pass
     else:
         webbrowser.open(url)
 
@@ -84,6 +102,48 @@ def request_android_permissions():
         pass
 
 
+def get_safe_insets():
+    """
+    Повертає (top, bottom, left, right) відступи в dp, під які не можна
+    класти інтерактивні елементи (виріз камери, статус-бар, смуга жестів
+    знизу). На не-Android платформах і у разі будь-якої помилки - нулі,
+    застосунок просто не матиме додаткових відступів.
+    """
+    if platform != "android":
+        return 0, 0, 0, 0
+
+    try:
+        from jnius import autoclass
+
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        activity = PythonActivity.mActivity
+        decor_view = activity.getWindow().getDecorView()
+        insets = decor_view.getRootWindowInsets()
+        if insets is None:
+            return 0, 0, 0, 0
+
+        Build_VERSION = autoclass("android.os.Build$VERSION")
+        sdk_int = Build_VERSION.SDK_INT
+
+        top = insets.getSystemWindowInsetTop()
+        bottom = insets.getSystemWindowInsetBottom()
+        left = insets.getSystemWindowInsetLeft()
+        right = insets.getSystemWindowInsetRight()
+
+        if sdk_int >= 28:
+            cutout = insets.getDisplayCutout()
+            if cutout is not None:
+                top = max(top, cutout.getSafeInsetTop())
+                bottom = max(bottom, cutout.getSafeInsetBottom())
+                left = max(left, cutout.getSafeInsetLeft())
+                right = max(right, cutout.getSafeInsetRight())
+
+        density = activity.getResources().getDisplayMetrics().density
+        return top / density, bottom / density, left / density, right / density
+    except Exception:
+        return 0, 0, 0, 0
+
+
 class SetupScreen(Screen):
     """Перший екран - введення API-ключа Gemini."""
 
@@ -91,15 +151,15 @@ class SetupScreen(Screen):
 
     def submit_key(self):
         key = self.ids.api_key_input.text.strip()
-        loc = App.get_running_app().loc
+        app = App.get_running_app()
 
         if not key:
-            self.error_text = loc.t("api_key_empty_error")
+            self.error_text = app.t("api_key_empty_error")
             return
 
         config.save_api_key(key)
         self.error_text = ""
-        App.get_running_app().go_to_main_screen()
+        app.go_to_main_screen()
 
     def open_instructions(self):
         open_url(API_KEY_INSTRUCTIONS_URL)
@@ -109,37 +169,46 @@ class ModelButton(Button):
     """Кнопка вибору моделі - сама відстежує, обрана вона чи ні (для kv-стилів)."""
     is_selected = BooleanProperty(False)
     model_name = StringProperty("")
+    scale = NumericProperty(1.0)
 
 
 class ReportItemButton(Button):
     """Кнопка одного моменту в списку звіту."""
     is_selected = BooleanProperty(False)
+    scale = NumericProperty(1.0)
+
+
+class ThemeChipButton(Button):
+    """Кнопка-"чіп" для перемикачів теми/мови (Авто/Світла/Темна, UA/EN)."""
+    is_selected = BooleanProperty(False)
+    scale = NumericProperty(1.0)
 
 
 class MainScreen(Screen):
     def on_pre_enter(self, *args):
-        app = App.get_running_app()
-        self.ids.search_label.text = app.loc.t("search_prompt_label")
-        self.ids.choose_video_btn.text = app.loc.t("choose_video")
-        self.ids.file_label.text = app.loc.t("no_file_selected")
-        self.ids.start_btn.text = app.loc.t("start_analysis")
-        self.ids.model_label.text = app.loc.t("choose_model_label")
-        self.ids.word_count_label.text = app.loc.t("word_count", count=0, max=MAX_WORDS_IN_PROMPT)
-        self.ids.status_label.text = ""
-
         self.video_path = None
         self.selected_model = None
         self.results = []
         self.current_screenshot_index = None
 
+        self.refresh_dynamic_texts()
         self._refresh_model_buttons()
 
+    def refresh_dynamic_texts(self):
+        """
+        Оновлює тексти, які не можна виразити прямою прив'язкою в .kv
+        (бо залежать від поточного стану екрана, а не лише від мови).
+        Викликається і при вході на екран, і при зміні мови "на льоту".
+        """
+        app = App.get_running_app()
+        if not getattr(self, "video_path", None):
+            self.ids.file_label.text = app.t("no_file_selected")
+
+        text = self.ids.prompt_input.text
+        count = len(text.split()) if text.strip() else 0
+        self.ids.word_count_label.text = app.t("word_count", count=count, max=MAX_WORDS_IN_PROMPT)
+
     def choose_video(self):
-        """
-        Відкриває нативний вибір файлу через plyer - на Android це
-        системний файловий провідник, на комп'ютері - звичайне вікно
-        вибору файлу.
-        """
         try:
             from plyer import filechooser
         except Exception:
@@ -169,23 +238,39 @@ class MainScreen(Screen):
     def update_word_count(self, text):
         app = App.get_running_app()
         count = len(text.split()) if text.strip() else 0
-        self.ids.word_count_label.text = app.loc.t("word_count", count=count, max=MAX_WORDS_IN_PROMPT)
-        self.ids.word_count_label.color = (0.8, 0.2, 0.2, 1) if count > MAX_WORDS_IN_PROMPT else (0.6, 0.6, 0.6, 1)
+        self.ids.word_count_label.text = app.t("word_count", count=count, max=MAX_WORDS_IN_PROMPT)
+        over_limit = app.palette["danger"]
+        muted = app.palette["text_muted"]
+        self.ids.word_count_label.color = over_limit if count > MAX_WORDS_IN_PROMPT else muted
+
+    def clear_all(self):
+        app = App.get_running_app()
+        self.video_path = None
+        self.selected_model = None
+        self.results = []
+        self.current_screenshot_index = None
+
+        self.ids.file_label.text = app.t("no_file_selected")
+        self.ids.prompt_input.text = ""
+        self.ids.status_label.text = ""
+        self.ids.report_list.clear_widgets()
+        self.ids.description_label.text = ""
+        self.ids.screenshot_image.source = ""
+        self._refresh_model_buttons()
 
     def start_analysis(self):
         app = App.get_running_app()
-        loc = app.loc
 
         if not self.video_path:
-            self.ids.status_label.text = loc.t("status_choose_video_first")
+            self.ids.status_label.text = app.t("status_choose_video_first")
             return
         if not self.selected_model:
-            self.ids.status_label.text = loc.t("status_choose_model")
+            self.ids.status_label.text = app.t("status_choose_model")
             return
 
         prompt_text = self.ids.prompt_input.text.strip()
         if not prompt_text:
-            self.ids.status_label.text = loc.t("status_write_query")
+            self.ids.status_label.text = app.t("status_write_query")
             return
 
         words = prompt_text.split()
@@ -193,21 +278,21 @@ class MainScreen(Screen):
             prompt_text = " ".join(words[:MAX_WORDS_IN_PROMPT])
 
         self.ids.start_btn.disabled = True
-        self.ids.status_label.text = loc.t("status_cutting_frames")
+        self.ids.status_label.text = app.t("status_cutting_frames")
 
         thread = threading.Thread(
             target=self._run_pipeline,
-            args=(prompt_text, self.selected_model, loc.language),
+            args=(prompt_text, self.selected_model, app.loc.language),
             daemon=True,
         )
         thread.start()
 
     def _set_status_async(self, key, **kwargs):
-        loc = App.get_running_app().loc
-        Clock.schedule_once(lambda dt: setattr(self.ids.status_label, "text", loc.t(key, **kwargs)))
+        app = App.get_running_app()
+        Clock.schedule_once(lambda dt: setattr(self.ids.status_label, "text", app.t(key, **kwargs)))
 
     def _run_pipeline(self, prompt_text, model_name, language):
-        loc = App.get_running_app().loc
+        app = App.get_running_app()
         try:
             frames = extract_frames(self.video_path, max_frames=MAX_FRAMES)
             self._set_status_async("status_frames_cut", count=len(frames))
@@ -217,7 +302,7 @@ class MainScreen(Screen):
             )
             self._set_status_async("status_moments_found", count=len(matches))
 
-            screenshots_dir = os.path.join(App.get_running_app().user_data_dir, SCREENSHOTS_SUBFOLDER)
+            screenshots_dir = os.path.join(app.user_data_dir, SCREENSHOTS_SUBFOLDER)
             os.makedirs(screenshots_dir, exist_ok=True)
 
             results = []
@@ -238,9 +323,9 @@ class MainScreen(Screen):
             Clock.schedule_once(lambda dt: self._show_results(results, prompt_text))
 
         except gemini_tools.MissingApiKeyError:
-            Clock.schedule_once(lambda dt: self._on_pipeline_error(loc.t("status_error", error="no API key")))
+            Clock.schedule_once(lambda dt: self._on_pipeline_error(app.t("status_error", error="no API key")))
         except Exception as error:
-            Clock.schedule_once(lambda dt: self._on_pipeline_error(loc.t("status_error", error=error)))
+            Clock.schedule_once(lambda dt: self._on_pipeline_error(app.t("status_error", error=error)))
 
     def _on_pipeline_error(self, text):
         self.ids.status_label.text = text
@@ -248,27 +333,28 @@ class MainScreen(Screen):
 
     def _show_results(self, results, prompt_text):
         app = App.get_running_app()
-        loc = app.loc
 
         self.ids.start_btn.disabled = False
-        self.ids.status_label.text = loc.t("status_done", count=len(results))
+        self.ids.status_label.text = app.t("status_done", count=len(results))
         self.results = results
 
         self.ids.report_list.clear_widgets()
 
         if not results:
             self.ids.report_list.add_widget(Label(
-                text=loc.t("nothing_found_list"), color=(0.6, 0.6, 0.6, 1), size_hint_y=None, height=40,
+                text=app.t("nothing_found_list"), color=app.palette["text_muted"],
+                size_hint_y=None, height=dp(40),
             ))
-            self.ids.description_label.text = loc.t("nothing_found_description", query=prompt_text)
+            self.ids.description_label.text = app.t("nothing_found_description", query=prompt_text)
             self.ids.screenshot_image.source = ""
+            self.ids.screenshot_image.opacity = 0
             return
 
         for index, result in enumerate(results):
             btn = ReportItemButton(
                 text=f"{result['time_str']}\n{result['description'][:45]}",
                 size_hint_y=None,
-                height=64,
+                height=dp(64),
             )
             btn.bind(on_release=lambda instance, i=index: self.show_result(i))
             self.ids.report_list.add_widget(btn)
@@ -281,29 +367,50 @@ class MainScreen(Screen):
         self.current_screenshot_index = index
         result = self.results[index]
 
-        # Підсвічуємо обрану кнопку (children в Kivy йдуть у зворотньому
-        # порядку додавання - останній доданий віджет опиняється першим)
         children = list(reversed(self.ids.report_list.children))
         for i, child in enumerate(children):
             if isinstance(child, ReportItemButton):
                 child.is_selected = (i == index)
 
         self.ids.description_label.text = f"{result['time_str']} — {result['description']}"
-        self.ids.screenshot_image.source = result["screenshot_path"]
-        self.ids.screenshot_image.reload()
+
+        image = self.ids.screenshot_image
+        image.source = result["screenshot_path"]
+        image.reload()
+        image.opacity = 0
+        Animation(opacity=1, duration=0.18).start(image)
 
 
 class SmartSurveillanceApp(App):
+    theme_name = StringProperty("auto")
+    language = StringProperty("ua")
+    palette = DictProperty(theme.DARK)
+
+    is_landscape = BooleanProperty(False)
+    window_width = NumericProperty(360)
+
+    safe_top = NumericProperty(0)
+    safe_bottom = NumericProperty(0)
+    safe_left = NumericProperty(0)
+    safe_right = NumericProperty(0)
+
     loc = None
 
     def build(self):
-        Window.clearcolor = (0.07, 0.07, 0.09, 1)
         request_android_permissions()
 
-        settings = {"language": "ua"}  # мобільна версія поки що без збереження мови між запусками
+        settings = settings_store.load_settings()
         self.loc = Localization(settings["language"])
+        self.language = settings["language"]
+        self.theme_name = settings["theme"]
+        self.palette = theme.resolve(self.theme_name)
+        Window.clearcolor = self.palette["bg"]
 
-        sm = ScreenManager(transition=NoTransition())
+        Window.bind(size=self._on_window_size)
+        self._on_window_size(Window, Window.size)
+        Clock.schedule_once(self._update_safe_insets, 0.3)
+
+        sm = ScreenManager(transition=FadeTransition(duration=0.18))
         sm.add_widget(SetupScreen(name="setup"))
         sm.add_widget(MainScreen(name="main"))
 
@@ -313,6 +420,41 @@ class SmartSurveillanceApp(App):
             sm.current = "setup"
 
         return sm
+
+    def t(self, key, **kwargs):
+        """Короткий доступ до перекладів прямо з .kv: app.t("key")."""
+        return self.loc.t(key, **kwargs)
+
+    def _on_window_size(self, window, size):
+        width, height = size
+        self.window_width = width
+        self.is_landscape = width > height
+        self._update_safe_insets()
+
+    def _update_safe_insets(self, *args):
+        top, bottom, left, right = get_safe_insets()
+        self.safe_top = top
+        self.safe_bottom = bottom
+        self.safe_left = left
+        self.safe_right = right
+
+    def set_theme(self, theme_name):
+        self.theme_name = theme_name
+        self.palette = theme.resolve(theme_name)
+        Window.clearcolor = self.palette["bg"]
+        settings_store.save_settings({"theme": theme_name, "language": self.language})
+
+    def set_language(self, language):
+        self.language = language
+        self.loc.set_language(language)
+        settings_store.save_settings({"theme": self.theme_name, "language": language})
+
+        if self.root:
+            try:
+                main_screen = self.root.get_screen("main")
+                main_screen.refresh_dynamic_texts()
+            except Exception:
+                pass
 
     def go_to_main_screen(self):
         self.root.current = "main"
