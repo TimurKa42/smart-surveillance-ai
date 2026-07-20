@@ -143,10 +143,11 @@
         size_hint_x: 1
         
     GhostButton:
-        text: "⚙️"
-        font_size: "24sp"
+        # Убрали эмодзи, используем текст
+        text: "Меню" if app.language == 'ua' else "Menu"
+        font_size: "14sp"
         size_hint_x: None
-        width: dp(50)
+        width: dp(70)
         on_release: app.open_settings()
 
 <SetupScreen>:
@@ -163,8 +164,7 @@
                 pos: self.pos
                 size: self.size
 
-        TopBar
-
+        # Убрали кнопку меню отсюда
         Widget:
             size_hint_y: 0.5
 
@@ -202,14 +202,15 @@
                 foreground_color: app.palette["text"]
                 hint_text_color: app.palette["text_muted"]
                 cursor_color: app.palette["text"]
-                padding: [dp(16), dp(14), dp(50), dp(14)]
+                # Увеличили отступ справа под более широкую текстовую кнопку
+                padding: [dp(16), dp(14), dp(80), dp(14)]
                 
             GhostButton:
                 id: eye_btn
-                text: "🙈"
-                font_size: "18sp"
+                text: "Показати" if app.language == 'ua' else "Show"
+                font_size: "12sp"
                 size_hint: (None, None)
-                size: (dp(40), dp(40))
+                size: (dp(75), dp(40))
                 pos_hint: {'right': 0.98, 'center_y': 0.5}
                 on_release: root.toggle_password()
 
@@ -421,27 +422,44 @@
                 size: self.size
                 radius: [dp(20), dp(20), 0, 0]
                 
-        RoundedLabel:
-            text: "Налаштування" if app.language == 'ua' else "Settings"
-            font_size: "18sp"
-            bold: True
-            halign: "center"
+        RelativeLayout:
+            size_hint_y: None
+            height: dp(40)
+            RoundedLabel:
+                # Все переводы теперь жестко привязаны к app.language для мгновенного обновления
+                text: "Налаштування" if app.language == 'ua' else "Settings"
+                font_size: "18sp"
+                bold: True
+                halign: "center"
+                pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+            GhostButton:
+                text: "✕"
+                size_hint: (None, None)
+                size: (dp(40), dp(40))
+                pos_hint: {'right': 1, 'center_y': 0.5}
+                on_release: root.dismiss()
             
         BoxLayout:
             size_hint_y: None
             height: dp(40)
+            spacing: dp(8)
             ThemeChipButton:
-                text: "Світла"
+                text: "Авто" if app.language == 'ua' else "Auto"
+                is_selected: app.theme_name == "auto"
+                on_release: app.safe_set_theme("auto")
+            ThemeChipButton:
+                text: "Світла" if app.language == 'ua' else "Light"
                 is_selected: app.theme_name == "light"
                 on_release: app.safe_set_theme("light")
             ThemeChipButton:
-                text: "Темна"
+                text: "Темна" if app.language == 'ua' else "Dark"
                 is_selected: app.theme_name == "dark"
                 on_release: app.safe_set_theme("dark")
                 
         BoxLayout:
             size_hint_y: None
             height: dp(40)
+            spacing: dp(8)
             ThemeChipButton:
                 text: "UA"
                 is_selected: app.language == "ua"
@@ -456,15 +474,15 @@
             size_hint_y: None
             height: dp(60)
             SubtleLabel:
-                text: "Відгук вібрації"
+                text: "Відгук вібрації" if app.language == 'ua' else "Vibration feedback"
             Slider:
                 min: 0
                 max: 0.1
-                value: 0.05
-                on_value: root.test_vibrate(*args)
+                value: app.vibration
+                on_value: app.save_vibration(self.value); root.test_vibrate(self, self.value)
                 
         Button:
-            text: "Скинути API Ключ"
+            text: "Скинути API Ключ" if app.language == 'ua' else "Reset API Key"
             background_normal: ""
             background_color: app.palette["danger"]
             size_hint_y: None
