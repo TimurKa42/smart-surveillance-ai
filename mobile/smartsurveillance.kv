@@ -2,11 +2,6 @@
 #:import animate_press main.animate_press
 #:import animate_release main.animate_release
 
-# ---------------------------------------------------------------
-# Кольори більше НЕ хардкодяться тут - усе береться з app.palette
-# (theme.py), яка перемикається між світлою/темною/авто темами.
-# ---------------------------------------------------------------
-
 <RoundedLabel@Label>:
     color: app.palette["text"]
     font_size: "16sp"
@@ -14,7 +9,6 @@
 <SubtleLabel@Label>:
     color: app.palette["text_muted"]
     font_size: "13sp"
-
 
 <AccentButton@Button>:
     scale: 1.0
@@ -41,7 +35,6 @@
     canvas.after:
         PopMatrix
 
-
 <GhostButton@Button>:
     scale: 1.0
     background_normal: ""
@@ -65,7 +58,6 @@
             radius: [dp(12)]
     canvas.after:
         PopMatrix
-
 
 <ModelButton>:
     background_normal: ""
@@ -91,15 +83,14 @@
     canvas.after:
         PopMatrix
 
-
 <ReportItemButton>:
     background_normal: ""
     background_down: ""
     background_color: 0, 0, 0, 0
     color: 1, 1, 1, 1
-    text_size: self.width - dp(20), None
+    text_size: self.width - dp(10), None
     halign: "left"
-    valign: "middle"
+    valign: "top"
     padding: [dp(12), dp(8)]
     font_size: "13sp"
     on_press: animate_press(self)
@@ -118,7 +109,6 @@
             radius: [dp(10)]
     canvas.after:
         PopMatrix
-
 
 <ThemeChipButton>:
     background_normal: ""
@@ -145,59 +135,19 @@
     canvas.after:
         PopMatrix
 
-
-# ---------------------------------------------------------------
-# Верхня панель: перемикач теми і мови. Спільна для обох екранів.
-# ---------------------------------------------------------------
 <TopBar@BoxLayout>:
     size_hint_y: None
-    height: dp(34)
-    spacing: dp(6)
-
-    SubtleLabel:
-        text: app.language and app.t("theme_label")
-        size_hint_x: None
-        width: self.texture_size[0] + dp(4)
-        font_size: "11sp"
-
-    ThemeChipButton:
-        text: app.language and app.t("theme_auto")
-        is_selected: app.theme_name == "auto"
-        on_release: app.set_theme("auto")
-
-    ThemeChipButton:
-        text: app.language and app.t("theme_light")
-        is_selected: app.theme_name == "light"
-        on_release: app.set_theme("light")
-
-    ThemeChipButton:
-        text: app.language and app.t("theme_dark")
-        is_selected: app.theme_name == "dark"
-        on_release: app.set_theme("dark")
-
+    height: dp(40)
+    
     Widget:
         size_hint_x: 1
-
-    SubtleLabel:
-        text: app.language and app.t("language_label")
+        
+    GhostButton:
+        text: "⚙️"
+        font_size: "24sp"
         size_hint_x: None
-        width: self.texture_size[0] + dp(4)
-        font_size: "11sp"
-
-    ThemeChipButton:
-        text: "UA"
-        size_hint_x: None
-        width: dp(40)
-        is_selected: app.language == "ua"
-        on_release: app.set_language("ua")
-
-    ThemeChipButton:
-        text: "EN"
-        size_hint_x: None
-        width: dp(40)
-        is_selected: app.language == "en"
-        on_release: app.set_language("en")
-
+        width: dp(50)
+        on_release: app.open_settings()
 
 <SetupScreen>:
     api_key_input: api_key_input
@@ -238,18 +188,30 @@
             size_hint_y: None
             height: dp(12)
 
-        TextInput:
-            id: api_key_input
-            hint_text: app.language and app.t("api_key_placeholder")
-            multiline: False
-            password: True
+        RelativeLayout:
             size_hint_y: None
             height: dp(52)
-            background_color: app.palette["surface"]
-            foreground_color: app.palette["text"]
-            hint_text_color: app.palette["text_muted"]
-            cursor_color: app.palette["text"]
-            padding: [dp(16), dp(14)]
+            
+            TextInput:
+                id: api_key_input
+                hint_text: app.language and app.t("api_key_placeholder")
+                multiline: False
+                password: True
+                size_hint: (1, 1)
+                background_color: app.palette["surface"]
+                foreground_color: app.palette["text"]
+                hint_text_color: app.palette["text_muted"]
+                cursor_color: app.palette["text"]
+                padding: [dp(16), dp(14), dp(50), dp(14)]
+                
+            GhostButton:
+                id: eye_btn
+                text: "🙈"
+                font_size: "18sp"
+                size_hint: (None, None)
+                size: (dp(40), dp(40))
+                pos_hint: {'right': 0.98, 'center_y': 0.5}
+                on_release: root.toggle_password()
 
         GhostButton:
             text: app.language and app.t("api_key_no_key_hint")
@@ -277,7 +239,6 @@
         Widget:
             size_hint_y: 1
 
-
 <MainScreen>:
     choose_video_btn: choose_video_btn
     file_label: file_label
@@ -294,7 +255,7 @@
 
     BoxLayout:
         orientation: "vertical"
-        padding: [dp(14) + app.safe_left, dp(10) + app.safe_top, dp(14) + app.safe_right, dp(8) + app.safe_bottom]
+        padding: [dp(14) + app.safe_left, dp(30) + app.safe_top, dp(14) + app.safe_right, dp(8) + app.safe_bottom]
         spacing: dp(8)
         canvas.before:
             Color:
@@ -305,15 +266,15 @@
 
         TopBar
 
-        # ---- вибір відео + очистити ----
         BoxLayout:
             size_hint_y: None
-            height: dp(44) if not app.is_landscape else dp(38)
+            height: dp(48)
             spacing: dp(8)
 
             AccentButton:
                 id: choose_video_btn
-                text: app.language and app.t("choose_video")
+                text: "Обрати\nвідео" if app.language == 'ua' else "Choose\nvideo"
+                halign: "center"
                 size_hint_x: 0.34
                 on_release: root.choose_video()
 
@@ -335,7 +296,6 @@
                 font_size: "12sp"
                 on_release: root.clear_all()
 
-        # ---- поле запиту ----
         BoxLayout:
             size_hint_y: None
             height: dp(20)
@@ -369,10 +329,8 @@
             text: app.language and app.t("start_analysis")
             size_hint_y: None
             height: dp(44) if app.is_landscape else dp(48)
-
             on_release: root.start_analysis()
 
-        # ---- вибір моделі ----
         BoxLayout:
             size_hint_y: None
             height: dp(36)
@@ -408,7 +366,6 @@
             halign: "left"
             text_size: self.width, None
 
-        # ---- звіт: список моментів + опис + скріншот ----
         BoxLayout:
             spacing: dp(10)
             orientation: "horizontal"
@@ -440,6 +397,7 @@
                 Image:
                     id: screenshot_image
                     fit_mode: "contain"
+                    opacity: 0
                     canvas.before:
                         Color:
                             rgba: app.palette["surface"]
@@ -447,3 +405,68 @@
                             pos: self.pos
                             size: self.size
                             radius: [dp(10)]
+                    on_touch_down:
+                        if self.collide_point(*args[1].pos) and self.opacity == 1: root.open_lightbox(self.source)
+
+<SettingsModal>:
+    BoxLayout:
+        orientation: "vertical"
+        padding: dp(20)
+        spacing: dp(15)
+        canvas.before:
+            Color:
+                rgba: app.palette["surface"]
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(20), dp(20), 0, 0]
+                
+        RoundedLabel:
+            text: "Налаштування" if app.language == 'ua' else "Settings"
+            font_size: "18sp"
+            bold: True
+            halign: "center"
+            
+        BoxLayout:
+            size_hint_y: None
+            height: dp(40)
+            ThemeChipButton:
+                text: "Світла"
+                is_selected: app.theme_name == "light"
+                on_release: app.safe_set_theme("light")
+            ThemeChipButton:
+                text: "Темна"
+                is_selected: app.theme_name == "dark"
+                on_release: app.safe_set_theme("dark")
+                
+        BoxLayout:
+            size_hint_y: None
+            height: dp(40)
+            ThemeChipButton:
+                text: "UA"
+                is_selected: app.language == "ua"
+                on_release: app.safe_set_language("ua")
+            ThemeChipButton:
+                text: "EN"
+                is_selected: app.language == "en"
+                on_release: app.safe_set_language("en")
+
+        BoxLayout:
+            orientation: "vertical"
+            size_hint_y: None
+            height: dp(60)
+            SubtleLabel:
+                text: "Відгук вібрації"
+            Slider:
+                min: 0
+                max: 0.1
+                value: 0.05
+                on_value: root.test_vibrate(*args)
+                
+        Button:
+            text: "Скинути API Ключ"
+            background_normal: ""
+            background_color: app.palette["danger"]
+            size_hint_y: None
+            height: dp(45)
+            on_release: root.reset_app()
