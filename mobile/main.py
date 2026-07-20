@@ -1,11 +1,5 @@
 """
 main.py (мобільна версія на Kivy)
-
-Два екрани:
-1) SetupScreen - показується, поки в застосунку ще нема збереженого
-   API-ключа Gemini.
-2) MainScreen - сам застосунок: вибір відео, текстовий запит, вибір
-   моделі, аналіз, звіт зі скріншотами.
 """
 import os
 import threading
@@ -60,11 +54,9 @@ def open_url(url):
     if platform == "android":
         try:
             from jnius import autoclass, cast
-
             Intent = autoclass("android.content.Intent")
             Uri = autoclass("android.net.Uri")
             PythonActivity = autoclass("org.kivy.android.PythonActivity")
-
             intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
             current_activity = cast("android.app.Activity", PythonActivity.mActivity)
             current_activity.startActivity(intent)
@@ -91,10 +83,8 @@ def request_android_permissions():
 def get_safe_insets():
     if platform != "android":
         return 0, 0, 0, 0
-
     try:
         from jnius import autoclass
-
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
         activity = PythonActivity.mActivity
         decor_view = activity.getWindow().getDecorView()
@@ -124,10 +114,14 @@ def get_safe_insets():
         return 0, 0, 0, 0
 
 
-def haptic_feedback(strength=0.05):
+def haptic_feedback(strength=None):
     try:
         if platform == "android":
-            vibrator.vibrate(strength)
+            if strength is None:
+                app = App.get_running_app()
+                strength = app.vibration if app else 0.05
+            if strength > 0:
+                vibrator.vibrate(strength)
     except Exception:
         pass
 
@@ -135,7 +129,7 @@ def haptic_feedback(strength=0.05):
 class SettingsModal(ModalView):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.size_hint = (1, 0.4)
+        self.size_hint = (1, 0.45)
         self.pos_hint = {'bottom': 1}
         self.background_color = (0, 0, 0, 0)
         
@@ -162,7 +156,6 @@ class LightboxModal(ModalView):
         scatter.add_widget(img)
         self.add_widget(scatter)
         
-        from kivy.uix.button import Button
         close_btn = GhostButton(text="✕ Закрити", size_hint=(None, None), size=(dp(100), dp(40)), pos_hint={'top': 0.95, 'right': 0.95})
         close_btn.bind(on_release=self.dismiss)
         self.add_widget(close_btn)
@@ -190,8 +183,9 @@ class SetupScreen(Screen):
         key = self.ids.api_key_input.text.strip()
         app = App.get_running_app()
 
-        if not key or len(key) < 35 or not key.startswith("AIza"):
-            self.error_text = "Невірний формат ключа! Він має починатися з 'AIza'"
+        # Полностью убрал строгую проверку! Оставил только проверку на пустоту.
+        if not key:
+            self.error_text = "Спочатку встав ключ" if app.language == 'ua' else "Please paste your key first"
             return
 
         config.save_api_key(key)
@@ -201,7 +195,9 @@ class SetupScreen(Screen):
     def toggle_password(self):
         inp = self.ids.api_key_input
         inp.password = not inp.password
-        self.ids.eye_btn.text = "🙈" if inp.password else "👁️"
+        app = App.get_running_app()
+        # Меняем текст кнопки динамически
+        self.ids.eye_btn.text = ("Сховати" if app.language == "ua" else "Hide") if not inp.password else ("Показати" if app.language == "ua" else "Show")
 
     def open_instructions(self):
         open_url(API_KEY_INSTRUCTIONS_URL)
@@ -212,16 +208,13 @@ class ModelButton(Button):
     model_name = StringProperty("")
     scale = NumericProperty(1.0)
 
-
 class ReportItemButton(Button):
     is_selected = BooleanProperty(False)
     scale = NumericProperty(1.0)
 
-
 class ThemeChipButton(Button):
     is_selected = BooleanProperty(False)
     scale = NumericProperty(1.0)
-
 
 class GhostButton(Button):
     scale = NumericProperty(1.0)
@@ -433,6 +426,7 @@ class SmartSurveillanceApp(App):
     theme_name = StringProperty("auto")
     language = StringProperty("ua")
     palette = DictProperty(theme.DARK)
+    vibration = NumericProperty(0.05) # Добавили свойство вибрации
 
     is_landscape = BooleanProperty(False)
     window_width = NumericProperty(360)
@@ -451,6 +445,7 @@ class SmartSurveillanceApp(App):
         self.loc = Localization(settings["language"])
         self.language = settings["language"]
         self.theme_name = settings["theme"]
+        self.vibration = settings.get("vibration", 0.05)
         self.palette = theme.resolve(self.theme_name)
         Window.clearcolor = self.palette["bg"]
 
@@ -480,6 +475,12 @@ class SmartSurveillanceApp(App):
     def safe_set_theme(self, theme_val):
         haptic_feedback(0.05)
         self.set_theme(theme_val)
+
+    def save_vibration(self, value):
+        self.vibration = value
+        settings = settings_store.load_settings()
+        settings["vibration"] = value
+        settings_store.save_settings(settings)
 
     def t(self, key, **kwargs):
         return self.loc.t(key, **kwargs)
@@ -517,7 +518,6 @@ class SmartSurveillanceApp(App):
 
     def go_to_main_screen(self):
         self.root.current = "main"
-
 
 if __name__ == "__main__":
     SmartSurveillanceApp().run()
