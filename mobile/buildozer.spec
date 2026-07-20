@@ -10,7 +10,7 @@ version = 1.0
 
 # Залежності. opencv-python на Android ставиться через рецепт
 # python-for-android (важкий пакет, перша збірка триватиме довго).
-requirements = python3,hostpython3,kivy,numpy==v2.0.2,opencv,pillow,google-genai,typing_extensions,python-dotenv,plyer,pyjnius
+requirements = python3,hostpython3,kivy,numpy==v2.0.2,opencv,pillow,requests,python-dotenv,plyer,pyjnius
 
 orientation = portrait
 fullscreen = 0
