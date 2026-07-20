@@ -10,7 +10,9 @@ Setup - тому клієнта Gemini не можна створювати од
 """
 from google import genai
 from google.genai import types
-from pydantic import BaseModel
+
+import json
+from dataclasses import dataclass
 
 import config
 
@@ -20,13 +22,19 @@ DEFAULT_MODEL_NAME = "gemini-3.5-flash"
 DEFAULT_PROMPT_LANGUAGE = "ua"
 
 
-class Match(BaseModel):
+@dataclass
+class Match:
+    """
+    Один знайдений момент. Раніше це був клас на Pydantic (BaseModel),
+    але pydantic_core - це скомпільований Rust-модуль, а
+    python-for-android не вміє зібрати його під архітектуру телефону
+    (ARM64) - тому на Android застосунок падав з помилкою "is for
+    EM_X86_64 instead of EM_AARCH64". dataclass - частина стандартної
+    бібліотеки Python, чистий Python-код без компільованих залежностей,
+    тому працює однаково і на десктопі, і на Android.
+    """
     frame_number: int
     description: str
-
-
-class AnalysisResult(BaseModel):
-    matches: list[Match]
 
 
 SYSTEM_PROMPTS = {
@@ -36,7 +44,9 @@ SYSTEM_PROMPTS = {
         "Правила відповіді:\n"
         "- Якщо об'єкта на кадрі нема - просто не включай цей кадр у відповідь.\n"
         "- Опис - 3-6 слів, лише суть (що це і де), українською мовою, без вступних "
-        "фраз на кшталт \"на цьому кадрі видно\" і без домислів."
+        "фраз на кшталт \"на цьому кадрі видно\" і без домислів.\n\n"
+        "Відповідай СУВОРО у форматі JSON без жодного додаткового тексту:\n"
+        '{{"matches": [{{"frame_number": 0, "description": "..."}}]}}'
     ),
     "en": (
         "You are a video surveillance system. Find the following object in the frames below:\n"
@@ -44,8 +54,31 @@ SYSTEM_PROMPTS = {
         "Response rules:\n"
         "- If the object is not present in a frame, simply do not include that frame in the response.\n"
         "- Description - 3-6 words, just the essence (what it is and where), in English, without "
-        "introductory phrases like \"this frame shows\" and without speculation."
+        "introductory phrases like \"this frame shows\" and without speculation.\n\n"
+        "Respond STRICTLY in this JSON format with no extra text:\n"
+        '{{"matches": [{{"frame_number": 0, "description": "..."}}]}}'
     ),
+}
+
+# JSON Schema (звичайний словник, не Pydantic-клас) - так само надійно
+# примушує Gemini повертати структуровану відповідь, але без жодних
+# зовнішніх бібліотек чи скомпільованого коду.
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "matches": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "frame_number": {"type": "integer"},
+                    "description": {"type": "string"},
+                },
+                "required": ["frame_number", "description"],
+            },
+        }
+    },
+    "required": ["matches"],
 }
 
 
@@ -91,10 +124,16 @@ def _analyze_batch(client, batch, index_offset, user_prompt, model_name, languag
         contents=contents,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=AnalysisResult,
+            response_schema=RESPONSE_SCHEMA,
             temperature=0.0,
         ),
     )
 
-    result = AnalysisResult.model_validate_json(response.text)
-    return result.matches
+    data = json.loads(response.text)
+    return [
+        Match(
+            frame_number=int(item["frame_number"]),
+            description=str(item["description"]),
+        )
+        for item in data.get("matches", [])
+    ]
