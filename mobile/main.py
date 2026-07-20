@@ -19,6 +19,11 @@ main.py (мобільна версія на Kivy)
 import os
 import threading
 import webbrowser
+import shutil
+from kivy.uix.modalview import ModalView
+from kivy.uix.scatterlayout import ScatterLayout
+from kivy.uix.image import AsyncImage
+from plyer import vibrator, storagepath
 
 from kivy.animation import Animation
 from kivy.app import App
@@ -153,13 +158,20 @@ class SetupScreen(Screen):
         key = self.ids.api_key_input.text.strip()
         app = App.get_running_app()
 
-        if not key:
-            self.error_text = app.t("api_key_empty_error")
+        # Базовая проверка на дурака
+        if not key or len(key) < 35 or not key.startswith("AIza"):
+            self.error_text = "Невірний формат ключа! Він має починатися з 'AIza'"
             return
 
         config.save_api_key(key)
         self.error_text = ""
         app.go_to_main_screen()
+        
+    def toggle_password(self):
+        # Переключатель глазика
+        inp = self.ids.api_key_input
+        inp.password = not inp.password
+        self.ids.eye_btn.text = "🙈" if inp.password else "👁️"
 
     def open_instructions(self):
         open_url(API_KEY_INSTRUCTIONS_URL)
@@ -255,7 +267,12 @@ class MainScreen(Screen):
         self.ids.status_label.text = ""
         self.ids.report_list.clear_widgets()
         self.ids.description_label.text = ""
+        
+        # Убираем белый прямоугольник!
         self.ids.screenshot_image.source = ""
+        self.ids.screenshot_image.opacity = 0 
+        
+        self.ids.start_btn.disabled = False # Разблокируем кнопку на всякий случай
         self._refresh_model_buttons()
 
     def start_analysis(self):
@@ -379,6 +396,70 @@ class MainScreen(Screen):
         image.reload()
         image.opacity = 0
         Animation(opacity=1, duration=0.18).start(image)
+
+
+def haptic_feedback(strength=0.05):
+    """Легкая вибрация, если поддерживается устройством."""
+    try:
+        if platform == "android":
+            vibrator.vibrate(strength)
+    except Exception:
+        pass
+
+class SettingsModal(ModalView):
+    """Выезжающее снизу меню настроек."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size_hint = (1, 0.4) # Занимает 40% экрана
+        self.pos_hint = {'bottom': 1}
+        self.background_color = (0,0,0,0) # Прозрачный фон модалки, дизайн в .kv
+        
+    def reset_app(self):
+        app = App.get_running_app()
+        haptic_feedback(0.1)
+        config.save_api_key("") # Стираем ключ
+        self.dismiss()
+        app.root.current = "setup"
+
+    def test_vibrate(self, instance, value):
+        haptic_feedback(value)
+
+class LightboxModal(ModalView):
+    """Зуминг фотки и скачивание."""
+    def __init__(self, image_path, **kwargs):
+        super().__init__(**kwargs)
+        self.image_path = image_path
+        self.size_hint = (1, 1)
+        self.background_color = (0, 0, 0, 0.9)
+        
+        # Контейнер для зума
+        scatter = ScatterLayout(do_rotation=False)
+        img = AsyncImage(source=image_path, fit_mode="contain")
+        scatter.add_widget(img)
+        self.add_widget(scatter)
+        
+        # Кнопка закрытия
+        close_btn = GhostButton(text="✕ Закрити", size_hint=(None, None), size=(dp(100), dp(40)), pos_hint={'top': 0.95, 'right': 0.95})
+        close_btn.bind(on_release=self.dismiss)
+        self.add_widget(close_btn)
+        
+        # Кнопка скачать
+        save_btn = AccentButton(text="📥 Зберегти", size_hint=(None, None), size=(dp(120), dp(40)), pos_hint={'bottom': 0.05, 'center_x': 0.5})
+        save_btn.bind(on_release=self.save_to_gallery)
+        self.add_widget(save_btn)
+
+    def save_to_gallery(self, *args):
+        try:
+            haptic_feedback(0.05)
+            # Пытаемся сохранить в публичную папку картинок
+            pics_dir = storagepath.get_pictures_dir()
+            filename = os.path.basename(self.image_path)
+            dest = os.path.join(pics_dir, filename)
+            shutil.copy(self.image_path, dest)
+            # В реальном приложении тут нужен Toast (уведомление), но для простоты просто закроем
+            self.dismiss()
+        except Exception as e:
+            print("Помилка збереження:", e)
 
 
 class SmartSurveillanceApp(App):
