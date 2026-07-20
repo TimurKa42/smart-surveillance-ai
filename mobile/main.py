@@ -6,15 +6,6 @@ main.py (мобільна версія на Kivy)
    API-ключа Gemini.
 2) MainScreen - сам застосунок: вибір відео, текстовий запит, вибір
    моделі, аналіз, звіт зі скріншотами.
-
-Порівняно з першою версією тут додано:
-- перемикач теми (авто/світла/темна) і мови (UA/EN), як у desktop-версії,
-  зі збереженням вибору між запусками (settings_store.py);
-- врахування "вирізів" екрана (камера, статус-бар, жести) через нативний
-  Android API - без цього кнопки під статус-баром неможливо натиснути;
-- реакція на поворот екрана (portrait/landscape) - деякі елементи
-  стають компактнішими в альбомній орієнтації, щоб усе влізало;
-- легкі анімації натискань кнопок і плавний перехід між екранами.
 """
 import os
 import threading
@@ -55,11 +46,6 @@ MODEL_OPTIONS = [
 ]
 
 
-# ---------------------------------------------------------------------
-# Дрібні "приємні" анімації натискань - винесені сюди, щоб .kv міг
-# викликати їх напряму (#:import у kv), без дублювання Animation(...)
-# у кожному правилі кнопки.
-# ---------------------------------------------------------------------
 def animate_press(widget):
     Animation.cancel_all(widget, "scale")
     Animation(scale=0.96, duration=0.08, t="out_quad").start(widget)
@@ -71,10 +57,6 @@ def animate_release(widget):
 
 
 def open_url(url):
-    """
-    Відкриває посилання в браузері. На звичайному комп'ютері спрацює
-    звичайний webbrowser.open(). На Android - через системний Intent.
-    """
     if platform == "android":
         try:
             from jnius import autoclass, cast
@@ -93,7 +75,6 @@ def open_url(url):
 
 
 def request_android_permissions():
-    """Android 6+ вимагає запитувати дозволи на читання файлів у рантаймі."""
     if platform != "android":
         return
     try:
@@ -108,12 +89,6 @@ def request_android_permissions():
 
 
 def get_safe_insets():
-    """
-    Повертає (top, bottom, left, right) відступи в dp, під які не можна
-    класти інтерактивні елементи (виріз камери, статус-бар, смуга жестів
-    знизу). На не-Android платформах і у разі будь-якої помилки - нулі,
-    застосунок просто не матиме додаткових відступів.
-    """
     if platform != "android":
         return 0, 0, 0, 0
 
@@ -149,16 +124,72 @@ def get_safe_insets():
         return 0, 0, 0, 0
 
 
-class SetupScreen(Screen):
-    """Перший екран - введення API-ключа Gemini."""
+def haptic_feedback(strength=0.05):
+    try:
+        if platform == "android":
+            vibrator.vibrate(strength)
+    except Exception:
+        pass
 
+
+class SettingsModal(ModalView):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size_hint = (1, 0.4)
+        self.pos_hint = {'bottom': 1}
+        self.background_color = (0, 0, 0, 0)
+        
+    def reset_app(self):
+        app = App.get_running_app()
+        haptic_feedback(0.1)
+        config.save_api_key("") 
+        self.dismiss()
+        app.root.current = "setup"
+
+    def test_vibrate(self, instance, value):
+        haptic_feedback(value)
+
+
+class LightboxModal(ModalView):
+    def __init__(self, image_path, **kwargs):
+        super().__init__(**kwargs)
+        self.image_path = image_path
+        self.size_hint = (1, 1)
+        self.background_color = (0, 0, 0, 0.9)
+        
+        scatter = ScatterLayout(do_rotation=False)
+        img = AsyncImage(source=image_path, fit_mode="contain")
+        scatter.add_widget(img)
+        self.add_widget(scatter)
+        
+        from kivy.uix.button import Button
+        close_btn = GhostButton(text="✕ Закрити", size_hint=(None, None), size=(dp(100), dp(40)), pos_hint={'top': 0.95, 'right': 0.95})
+        close_btn.bind(on_release=self.dismiss)
+        self.add_widget(close_btn)
+        
+        save_btn = AccentButton(text="📥 Зберегти", size_hint=(None, None), size=(dp(120), dp(40)), pos_hint={'bottom': 0.05, 'center_x': 0.5})
+        save_btn.bind(on_release=self.save_to_gallery)
+        self.add_widget(save_btn)
+
+    def save_to_gallery(self, *args):
+        try:
+            haptic_feedback(0.05)
+            pics_dir = storagepath.get_pictures_dir()
+            filename = os.path.basename(self.image_path)
+            dest = os.path.join(pics_dir, filename)
+            shutil.copy(self.image_path, dest)
+            self.dismiss()
+        except Exception as e:
+            print("Помилка збереження:", e)
+
+
+class SetupScreen(Screen):
     error_text = StringProperty("")
 
     def submit_key(self):
         key = self.ids.api_key_input.text.strip()
         app = App.get_running_app()
 
-        # Базовая проверка на дурака
         if not key or len(key) < 35 or not key.startswith("AIza"):
             self.error_text = "Невірний формат ключа! Він має починатися з 'AIza'"
             return
@@ -168,7 +199,6 @@ class SetupScreen(Screen):
         app.go_to_main_screen()
         
     def toggle_password(self):
-        # Переключатель глазика
         inp = self.ids.api_key_input
         inp.password = not inp.password
         self.ids.eye_btn.text = "🙈" if inp.password else "👁️"
@@ -178,21 +208,25 @@ class SetupScreen(Screen):
 
 
 class ModelButton(Button):
-    """Кнопка вибору моделі - сама відстежує, обрана вона чи ні (для kv-стилів)."""
     is_selected = BooleanProperty(False)
     model_name = StringProperty("")
     scale = NumericProperty(1.0)
 
 
 class ReportItemButton(Button):
-    """Кнопка одного моменту в списку звіту."""
     is_selected = BooleanProperty(False)
     scale = NumericProperty(1.0)
 
 
 class ThemeChipButton(Button):
-    """Кнопка-"чіп" для перемикачів теми/мови (Авто/Світла/Темна, UA/EN)."""
     is_selected = BooleanProperty(False)
+    scale = NumericProperty(1.0)
+
+
+class GhostButton(Button):
+    scale = NumericProperty(1.0)
+    
+class AccentButton(Button):
     scale = NumericProperty(1.0)
 
 
@@ -207,11 +241,6 @@ class MainScreen(Screen):
         self._refresh_model_buttons()
 
     def refresh_dynamic_texts(self):
-        """
-        Оновлює тексти, які не можна виразити прямою прив'язкою в .kv
-        (бо залежать від поточного стану екрана, а не лише від мови).
-        Викликається і при вході на екран, і при зміні мови "на льоту".
-        """
         app = App.get_running_app()
         if not getattr(self, "video_path", None):
             self.ids.file_label.text = app.t("no_file_selected")
@@ -268,11 +297,10 @@ class MainScreen(Screen):
         self.ids.report_list.clear_widgets()
         self.ids.description_label.text = ""
         
-        # Убираем белый прямоугольник!
         self.ids.screenshot_image.source = ""
         self.ids.screenshot_image.opacity = 0 
         
-        self.ids.start_btn.disabled = False # Разблокируем кнопку на всякий случай
+        self.ids.start_btn.disabled = False
         self._refresh_model_buttons()
 
     def start_analysis(self):
@@ -397,69 +425,8 @@ class MainScreen(Screen):
         image.opacity = 0
         Animation(opacity=1, duration=0.18).start(image)
 
-
-def haptic_feedback(strength=0.05):
-    """Легкая вибрация, если поддерживается устройством."""
-    try:
-        if platform == "android":
-            vibrator.vibrate(strength)
-    except Exception:
-        pass
-
-class SettingsModal(ModalView):
-    """Выезжающее снизу меню настроек."""
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.size_hint = (1, 0.4) # Занимает 40% экрана
-        self.pos_hint = {'bottom': 1}
-        self.background_color = (0,0,0,0) # Прозрачный фон модалки, дизайн в .kv
-        
-    def reset_app(self):
-        app = App.get_running_app()
-        haptic_feedback(0.1)
-        config.save_api_key("") # Стираем ключ
-        self.dismiss()
-        app.root.current = "setup"
-
-    def test_vibrate(self, instance, value):
-        haptic_feedback(value)
-
-class LightboxModal(ModalView):
-    """Зуминг фотки и скачивание."""
-    def __init__(self, image_path, **kwargs):
-        super().__init__(**kwargs)
-        self.image_path = image_path
-        self.size_hint = (1, 1)
-        self.background_color = (0, 0, 0, 0.9)
-        
-        # Контейнер для зума
-        scatter = ScatterLayout(do_rotation=False)
-        img = AsyncImage(source=image_path, fit_mode="contain")
-        scatter.add_widget(img)
-        self.add_widget(scatter)
-        
-        # Кнопка закрытия
-        close_btn = GhostButton(text="✕ Закрити", size_hint=(None, None), size=(dp(100), dp(40)), pos_hint={'top': 0.95, 'right': 0.95})
-        close_btn.bind(on_release=self.dismiss)
-        self.add_widget(close_btn)
-        
-        # Кнопка скачать
-        save_btn = AccentButton(text="📥 Зберегти", size_hint=(None, None), size=(dp(120), dp(40)), pos_hint={'bottom': 0.05, 'center_x': 0.5})
-        save_btn.bind(on_release=self.save_to_gallery)
-        self.add_widget(save_btn)
-
-    def save_to_gallery(self, *args):
-        try:
-            haptic_feedback(0.05)
-            # Пытаемся сохранить в публичную папку картинок
-            pics_dir = storagepath.get_pictures_dir()
-            filename = os.path.basename(self.image_path)
-            dest = os.path.join(pics_dir, filename)
-            shutil.copy(self.image_path, dest)
-            # В реальном приложении тут нужен Toast (уведомление), но для простоты просто закроем
-            self.dismiss()
-        except Exception as e:
-            print("Помилка збереження:", e)
+    def open_lightbox(self, path):
+        LightboxModal(path).open()
 
 
 class SmartSurveillanceApp(App):
@@ -502,8 +469,19 @@ class SmartSurveillanceApp(App):
 
         return sm
 
+    def open_settings(self):
+        haptic_feedback(0.05)
+        SettingsModal().open()
+        
+    def safe_set_language(self, lang):
+        haptic_feedback(0.05)
+        self.set_language(lang)
+        
+    def safe_set_theme(self, theme_val):
+        haptic_feedback(0.05)
+        self.set_theme(theme_val)
+
     def t(self, key, **kwargs):
-        """Короткий доступ до перекладів прямо з .kv: app.t("key")."""
         return self.loc.t(key, **kwargs)
 
     def _on_window_size(self, window, size):
