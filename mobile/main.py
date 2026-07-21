@@ -298,16 +298,17 @@ class ModelButton(Button):
 
 class ReportItemButton(ButtonBehavior, BoxLayout):
     """
-    Раніше це був звичайний Button з text = "час\\nопис" - через це
-    ЧАС теж переносився на новий рядок, коли не вміщався по ширині
-    (наприклад "00:00:0" / "9"). Тепер це композитний віджет з двома
-    окремими Label: time_text (НІКОЛИ не переноситься, ширина
-    підганяється під сам текст) і desc_text (переноситься як завжди).
+    У списку тепер тільки ЧАС - компактний чіп фіксованої висоти.
+    Опис від ШІ лишається там, де й був - у панелі деталей праворуч
+    (description_label), яка показує "{час} — {опис}" після вибору
+    пункту. Раніше тут намагались вмістити ще й опис прямо в кожен
+    пункт списку - у вузькій колонці (~40% екрана) довгий український
+    текст переносився по одній літері на рядок (це і було на скріні:
+    вертикальний "стовпчик" з літер).
     """
     is_selected = BooleanProperty(False)
     scale = NumericProperty(1.0)
     time_text = StringProperty("")
-    desc_text = StringProperty("")
 
 class ThemeChipButton(Button):
     is_selected = BooleanProperty(False)
@@ -511,15 +512,13 @@ class MainScreen(Screen):
             return
 
         for index, result in enumerate(results):
-            # Висота більше НЕ фіксована (dp(64)) - вона підганяється
-            # під реальний текст у .kv (bind до texture_size). Раніше
-            # довгі описи або обрізались до 45 символів, або вилазили
-            # за межі фіксованої висоти кнопки. time_text і desc_text
-            # тепер окремі поля - час більше ніколи не переноситься.
+            # У списку - тільки час, фіксована компактна висота.
+            # Повний опис від ШІ показується у панелі справа після
+            # вибору (description_label), а не тут.
             btn = ReportItemButton(
                 time_text=result["time_str"],
-                desc_text=result["description"],
                 size_hint_y=None,
+                height=dp(44),
             )
             btn.bind(on_release=lambda instance, i=index: self.show_result(i))
             self.ids.report_list.add_widget(btn)
