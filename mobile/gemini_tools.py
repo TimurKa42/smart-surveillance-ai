@@ -23,12 +23,22 @@ Python, без скомпільованих залежностей) напрям
 import base64
 import json
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
 import config
 
 BATCH_SIZE = 40
+
+# Скільки пачок кадрів відправляємо в Gemini ОДНОЧАСНО. Раніше пачки
+# йшли одна за одною в звичайному циклі - для відео, де кадрів
+# набиралось на 3-4 пачки, це означало 3-4 послідовних мережевих
+# очікування замість одного. Gemini REST не має проблем з паралельними
+# запитами по одному ключу - це просто N незалежних HTTP-викликів.
+# 4 - обережне значення з запасом під безкоштовний ліміт ключа; якщо
+# у тебе платний тір - можна сміливо піднімати до 6-8.
+MAX_PARALLEL_BATCHES = 4
 
 DEFAULT_MODEL_NAME = "gemini-3.5-flash"
 DEFAULT_PROMPT_LANGUAGE = "ua"
@@ -138,14 +148,35 @@ def _get_api_key():
 
 
 def find_object_in_frames(frames, user_prompt, model_name=DEFAULT_MODEL_NAME, language=DEFAULT_PROMPT_LANGUAGE):
-    """Розбиває кадри на пачки по BATCH_SIZE і аналізує кожну окремим запитом."""
+    """
+    Розбиває кадри на пачки по BATCH_SIZE і аналізує їх ПАРАЛЕЛЬНО
+    (до MAX_PARALLEL_BATCHES одночасно) замість послідовного циклу.
+    Порядок результатів у підсумковому списку не важливий - виклик
+    show_result() у main.py все одно сортує results за timestamp_sec.
+    """
     api_key = _get_api_key()
-    all_matches = []
 
-    for batch_start in range(0, len(frames), BATCH_SIZE):
-        batch = frames[batch_start:batch_start + BATCH_SIZE]
-        batch_matches = _analyze_batch(api_key, batch, batch_start, user_prompt, model_name, language)
-        all_matches.extend(batch_matches)
+    batches = [
+        (batch_start, frames[batch_start:batch_start + BATCH_SIZE])
+        for batch_start in range(0, len(frames), BATCH_SIZE)
+    ]
+
+    if not batches:
+        return []
+
+    all_matches = []
+    worker_count = min(MAX_PARALLEL_BATCHES, len(batches))
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(_analyze_batch, api_key, batch, offset, user_prompt, model_name, language): offset
+            for offset, batch in batches
+        }
+        for future in as_completed(futures):
+            # Якщо хоч одна пачка впала з помилкою - result() тут же
+            # перекине виняток нагору, у _run_pipeline (main.py), де
+            # він і так уже оброблюється єдиним except-блоком.
+            all_matches.extend(future.result())
 
     return all_matches
 
