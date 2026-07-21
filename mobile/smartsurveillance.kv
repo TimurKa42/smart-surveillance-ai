@@ -173,6 +173,39 @@
             cap: "round"
     canvas.after:
         PopMatrix
+<MenuButton@Button>:
+    # Окремий клас, а НЕ GhostButton з перевизначеним accent_color.
+    # Причина: у GhostButton є базове правило
+    # "accent_color: app.palette['surface_alt']" - воно прив'язане до
+    # app.palette і перевиконується КОЖНОГО разу, коли тема
+    # змінюється, затираючи будь-яке перевизначення кольору для
+    # конкретного екземпляра GhostButton. Через це кнопка "Меню"
+    # губила оранжевий колір саме в момент перемикання теми.
+    # MenuButton взагалі не має цієї прив'язки до app.palette, тому
+    # колір лишається фіксованим завжди.
+    scale: 1.0
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    color: 1, 1, 1, 1
+    font_size: "14sp"
+    bold: True
+    on_press: animate_press(self)
+    on_release: animate_release(self)
+    canvas.before:
+        PushMatrix
+        Scale:
+            origin: self.center
+            x: self.scale
+            y: self.scale
+        Color:
+            rgba: (1, 0.62, 0.28, 1) if self.state == "down" else (0.93, 0.51, 0.13, 1)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(12)]
+    canvas.after:
+        PopMatrix
 
 <TopBar@BoxLayout>:
     size_hint_y: None
@@ -181,15 +214,8 @@
     Widget:
         size_hint_x: 1
 
-    GhostButton:
-        # Яскравий колір, щоб кнопка "Меню" виділялась на фоні решти
-        # інтерфейсу (раніше була такого ж кольору, як усі інші
-        # неакцентні кнопки, і губилась).
+    MenuButton:
         text: "Меню" if app.language == 'ua' else "Menu"
-        font_size: "14sp"
-        bold: True
-        color: 1, 1, 1, 1
-        accent_color: 0.93, 0.51, 0.13, 1
         size_hint_x: None
         width: dp(70)
         on_release: app.open_settings()
