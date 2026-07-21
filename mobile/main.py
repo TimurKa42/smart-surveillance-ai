@@ -18,6 +18,7 @@ from kivy.metrics import dp
 from kivy.properties import BooleanProperty, DictProperty, NumericProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.screenmanager import FadeTransition, Screen, ScreenManager
 from kivy.uix.button import Button
 from kivy.uix.label import Label
@@ -218,40 +219,66 @@ class LightboxModal(ModalView):
         self.size_hint = (1, 1)
         self.background_color = (0, 0, 0, 0.9)
 
+        app = App.get_running_app()
+
+        # ВАЖЛИВО: раніше кнопки додавались напряму в ModalView з
+        # pos_hint={'top': 1, ...}. Внутрішній контейнер ModalView не
+        # завжди чесно підтримує pos_hint для дітей так, як звичайний
+        # FloatLayout - тому кнопки "злітали" в центр екрана замість
+        # правого верхнього кута. Тепер явний FloatLayout - і позиція
+        # кнопок рахується вручну через self.pos (dp-точно, з
+        # урахуванням вирізу камери app.safe_top/app.safe_right), а не
+        # через pos_hint - це завжди працює однаково передбачувано.
+        root = FloatLayout()
+
         scatter = ScatterLayout(do_rotation=False)
         img = AsyncImage(source=image_path, fit_mode="contain")
         scatter.add_widget(img)
-        self.add_widget(scatter)
+        root.add_widget(scatter)
 
-        app = App.get_running_app()
-
-        # Верхня панель праворуч: "Зберегти" ЛІВОРУЧ від кнопки закриття
-        # (як і просили) - обидві кнопки в одному рядку у правому
-        # верхньому куті, а не розкидані по різних кутах екрана, як
-        # було раніше (AccentButton внизу по центру).
-        top_bar = BoxLayout(
+        self.top_bar = BoxLayout(
             orientation="horizontal",
-            size_hint=(1, None),
-            height=dp(56),
-            pos_hint={'top': 1},
-            padding=[dp(12), dp(8), dp(12), dp(8)],
-            spacing=dp(10),
+            size_hint=(None, None),
+            size=(dp(160), dp(44)),
+            spacing=dp(8),
         )
-        top_bar.add_widget(Widget(size_hint_x=1))  # спейсер, притискає кнопки праворуч
 
         save_btn = GhostButton(
             text=app.t("lightbox_save") if app else "Зберегти",
             size_hint=(None, None),
-            size=(dp(110), dp(40)),
+            size=(dp(108), dp(44)),
         )
         save_btn.bind(on_release=self.save_to_gallery)
-        top_bar.add_widget(save_btn)
+        self.top_bar.add_widget(save_btn)
 
-        close_btn = CloseButton(size_hint=(None, None), size=(dp(40), dp(40)))
+        close_btn = CloseButton(size_hint=(None, None), size=(dp(44), dp(44)))
         close_btn.bind(on_release=self.dismiss)
-        top_bar.add_widget(close_btn)
+        self.top_bar.add_widget(close_btn)
 
-        self.add_widget(top_bar)
+        root.add_widget(self.top_bar)
+        self.add_widget(root)
+
+        self._reposition_top_bar()
+        Window.bind(size=self._reposition_top_bar)
+        if app:
+            app.bind(safe_top=self._reposition_top_bar, safe_right=self._reposition_top_bar)
+        self.bind(on_dismiss=self._unbind_reposition)
+
+    def _reposition_top_bar(self, *args):
+        app = App.get_running_app()
+        safe_top = app.safe_top if app else 0
+        safe_right = app.safe_right if app else 0
+        margin = dp(12)
+        self.top_bar.pos = (
+            Window.width - self.top_bar.width - margin - dp(safe_right),
+            Window.height - self.top_bar.height - margin - dp(safe_top),
+        )
+
+    def _unbind_reposition(self, *args):
+        Window.unbind(size=self._reposition_top_bar)
+        app = App.get_running_app()
+        if app:
+            app.unbind(safe_top=self._reposition_top_bar, safe_right=self._reposition_top_bar)
 
     def save_to_gallery(self, *args):
         try:
