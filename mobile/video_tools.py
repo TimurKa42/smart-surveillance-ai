@@ -5,7 +5,6 @@ import cv2
 # бо в збірці для Android може стояти дещо старіша версія OpenCV, де цих
 # констант ще нема серед іменованих атрибутів, хоча самі числові ID стабільні.
 _CAP_PROP_ORIENTATION_META = getattr(cv2, "CAP_PROP_ORIENTATION_META", 48)
-_CAP_PROP_ORIENTATION_AUTO = getattr(cv2, "CAP_PROP_ORIENTATION_AUTO", 49)
 
 
 def _prepare_orientation(video):
@@ -15,19 +14,23 @@ def _prepare_orientation(video):
     ЗАВДЯКИ цій метадані. OpenCV за замовчуванням її ІГНОРУЄ і віддає
     сирі, неповернуті кадри.
 
-    Спочатку пробуємо попросити OpenCV повертати кадри самостійно
-    (CAP_PROP_ORIENTATION_AUTO). Якщо це не спрацювало (стара збірка
-    без підтримки) - зчитуємо кут з метаданих і повертаємо кадри
-    вручну через _apply_manual_rotation().
+    РАНІШЕ тут спершу пробували попросити OpenCV повертати кадри
+    самостійно через video.set(CAP_PROP_ORIENTATION_AUTO, 1) і, якщо
+    set() повертав True, вважали поворот "вирішеним" і одразу
+    поверталися з 0 (без ручного повороту).
+
+    ПРОБЛЕМА: на багатьох Android-збірках OpenCV (зокрема тих, що
+    йдуть у python-for-android/Buildozer) video.set(...) МОВЧКИ
+    повертає True - властивість формально "прийнялась" - але backend
+    її насправді ІГНОРУЄ, і кадри так і приходили неповернутими. Через
+    це вертикальні відео в звіті лягали "на бік" (кут зчитувався
+    правильно, але ніколи не застосовувався).
+
+    Тепер ми НЕ покладаємось на цей ненадійний прапорець і ЗАВЖДИ самі
+    читаємо кут із метаданих та повертаємо кадри вручну через
+    _apply_manual_rotation() - це працює однаково незалежно від збірки
+    OpenCV.
     """
-    try:
-        auto_ok = bool(video.set(_CAP_PROP_ORIENTATION_AUTO, 1))
-    except Exception:
-        auto_ok = False
-
-    if auto_ok:
-        return 0
-
     try:
         angle = int(video.get(_CAP_PROP_ORIENTATION_META)) % 360
     except Exception:
