@@ -447,19 +447,57 @@ class LightboxModal(ModalView):
 
 class SetupScreen(Screen):
     error_text = StringProperty("")
+    is_checking = BooleanProperty(False)
 
     def submit_key(self):
         key = self.ids.api_key_input.text.strip()
         app = App.get_running_app()
 
-        # Полностью убрал строгую проверку! Оставил только проверку на пустоту.
         if not key:
             self.error_text = "Спочатку встав ключ" if app.language == 'ua' else "Please paste your key first"
             return
 
-        config.save_api_key(key)
+        if self.is_checking:
+            return  # вже перевіряємо - ігноруємо повторний тап
+
         self.error_text = ""
-        app.go_to_main_screen()
+        self.is_checking = True
+        self.ids.submit_btn.disabled = True
+        self.ids.submit_btn.text = (
+            "Перевіряю ключ..." if app.language == 'ua' else "Checking key..."
+        )
+
+        # Мережевий запит - обов'язково у фоновому потоці, щоб не
+        # заморожувати інтерфейс на секунди очікування відповіді.
+        thread = threading.Thread(target=self._check_key_in_background, args=(key,), daemon=True)
+        thread.start()
+
+    def _check_key_in_background(self, key):
+        result = gemini_tools.check_api_key(key)
+        Clock.schedule_once(lambda dt: self._on_key_checked(key, result))
+
+    def _on_key_checked(self, key, result):
+        app = App.get_running_app()
+        ua = app.language == 'ua'
+
+        self.is_checking = False
+        self.ids.submit_btn.disabled = False
+        self.ids.submit_btn.text = "Зберегти і продовжити" if ua else "Save and continue"
+
+        if result == "valid":
+            config.save_api_key(key)
+            self.error_text = ""
+            app.go_to_main_screen()
+        elif result == "invalid":
+            self.error_text = (
+                "Ключ недійсний або немає доступу до Gemini API" if ua
+                else "Invalid key or no access to Gemini API"
+            )
+        else:  # network_error
+            self.error_text = (
+                "Не вдалося перевірити ключ. Перевір інтернет-з'єднання" if ua
+                else "Couldn't verify the key. Check your internet connection"
+            )
 
     def toggle_password(self):
         inp = self.ids.api_key_input
