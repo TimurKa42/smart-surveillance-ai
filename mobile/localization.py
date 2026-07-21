@@ -46,6 +46,7 @@ TEXTS = {
         "status_moments_found": "Моментів знайдено: {count}. Зберігаю кадри...",
         "status_done": "Готово! Знайдено моментів: {count}",
         "status_error": "Помилка: {error}",
+        "status_cancelled": "Скасовано",
 
         "nothing_found_list": "Нічого не знайдено",
         "nothing_found_description": "За запитом «{query}» на відео нічого не знайдено.",
@@ -110,6 +111,7 @@ TEXTS = {
         "status_moments_found": "Moments found: {count}. Saving frames...",
         "status_done": "Done! Moments found: {count}",
         "status_error": "Error: {error}",
+        "status_cancelled": "Cancelled",
 
         "nothing_found_list": "Nothing found",
         "nothing_found_description": "Nothing was found in the video for the query \u201c{query}\u201d.",
