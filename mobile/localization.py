@@ -50,8 +50,7 @@ TEXTS = {
         "nothing_found_list": "Нічого не знайдено",
         "nothing_found_description": "За запитом «{query}» на відео нічого не знайдено.",
 
-        "lightbox_close": "Закрити",
-        "lightbox_save": "Зберегти",
+        "lightbox_close": "✕ Закрити",
 
         "file_dialog_title": "Обери відео",
         "file_dialog_video_files": "Відеофайли",
@@ -64,15 +63,26 @@ TEXTS = {
 
         "language_label": "Мова:",
 
-        # ---- мобільна версія: екран вводу API-ключа ----
+        # ---- екран вводу API-ключа ----
         "api_key_screen_title": "Вітаємо у Smart Surveillance AI",
         "api_key_screen_subtitle": "Щоб почати, встав свій API-ключ Gemini",
         "api_key_placeholder": "Встав свій ключ сюди...",
         "api_key_no_key_hint": "Немає ключа? Дізнатись, як отримати",
         "api_key_submit": "Зберегти і продовжити",
         "api_key_empty_error": "Спочатку встав ключ",
-        "api_key_saved": "Ключ збережено!",
-        "change_api_key": "Змінити ключ",
+        "api_key_invalid": "Ключ недійсний або немає доступу до Gemini API",
+
+        # ---- шторка налаштувань ----
+        "settings_title": "Налаштування",
+        "reset_button": "Скинути API Ключ",
+
+        # ---- перегляд фото (lightbox) ----
+        "lightbox_save": "Зберегти",
+        "image_saved": "Збережено в галерею",
+        "image_save_failed": "Не вдалось зберегти",
+
+        # ---- вибір відео ----
+        "status_video_open_failed": "Не вдалося відкрити обраний файл. Спробуй ще раз",
     },
     LANG_EN: {
         "window_title": "Smart Surveillance AI",
@@ -104,8 +114,7 @@ TEXTS = {
         "nothing_found_list": "Nothing found",
         "nothing_found_description": "Nothing was found in the video for the query \u201c{query}\u201d.",
 
-        "lightbox_close": "Close",
-        "lightbox_save": "Save",
+        "lightbox_close": "✕ Close",
 
         "file_dialog_title": "Choose a video",
         "file_dialog_video_files": "Video files",
@@ -118,15 +127,26 @@ TEXTS = {
 
         "language_label": "Language:",
 
-        # ---- mobile version: API key setup screen ----
+        # ---- API key setup screen ----
         "api_key_screen_title": "Welcome to Smart Surveillance AI",
         "api_key_screen_subtitle": "To get started, paste your Gemini API key",
         "api_key_placeholder": "Paste your key here...",
         "api_key_no_key_hint": "No key? Learn how to get one",
         "api_key_submit": "Save and continue",
         "api_key_empty_error": "Please paste your key first",
-        "api_key_saved": "Key saved!",
-        "change_api_key": "Change key",
+        "api_key_invalid": "Invalid key or no access to Gemini API",
+
+        # ---- settings sheet ----
+        "settings_title": "Settings",
+        "reset_button": "Reset API Key",
+
+        # ---- photo viewer (lightbox) ----
+        "lightbox_save": "Save",
+        "image_saved": "Saved to gallery",
+        "image_save_failed": "Failed to save",
+
+        # ---- video picking ----
+        "status_video_open_failed": "Couldn't open the selected file. Please try again",
     },
 }
 
