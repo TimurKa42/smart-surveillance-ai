@@ -92,6 +92,42 @@ class GeminiApiError(Exception):
     """Кидається, якщо Gemini API повернув помилку (неправильний ключ, ліміти тощо)."""
 
 
+def check_api_key(api_key):
+    """
+    Перевіряє ключ РЕАЛЬНИМ запитом до Gemini API (список моделей -
+    найлегший можливий запит, нічого не генерує і не витрачає квоту).
+
+    Навмисно НЕ перевіряємо ключ за виглядом/префіксом рядка (напр.
+    "AQ.Ab8...") - формат ключів Google може відрізнятись і змінюватись
+    з часом, тому єдиний надійний спосіб дізнатись, робочий ключ чи ні -
+    справді запитати ним щось у Gemini.
+
+    Повертає один з трьох станів:
+    - "valid"          - ключ підходить, 200 OK.
+    - "invalid"        - Gemini явно відхилив ключ (400/401/403).
+    - "network_error"  - не вдалося достукатись до сервера взагалі
+                          (нема інтернету, таймаут тощо). Це НЕ означає,
+                          що ключ поганий - UI повинен показати інше
+                          повідомлення, а не "ключ недійсний".
+    """
+    try:
+        response = requests.get(
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            params={"key": api_key},
+            timeout=15,
+        )
+    except requests.exceptions.RequestException:
+        return "network_error"
+
+    if response.status_code == 200:
+        return "valid"
+    if response.status_code in (400, 401, 403):
+        return "invalid"
+    # Інший код (5xx, тимчасові ліміти тощо) - не можемо впевнено
+    # сказати, що ключ поганий, тому теж трактуємо як мережеву невдачу.
+    return "network_error"
+
+
 def _get_api_key():
     api_key = config.load_api_key()
     if not api_key:
