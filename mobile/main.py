@@ -16,7 +16,7 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp
-from kivy.properties import BooleanProperty, DictProperty, NumericProperty, StringProperty
+from kivy.properties import BooleanProperty, DictProperty, ListProperty, NumericProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
@@ -535,6 +535,17 @@ class ThemeChipButton(Button):
 
 class GhostButton(Button):
     scale = NumericProperty(1.0)
+    # ВАЖЛИВО: accent_color раніше НЕ був оголошений як Kivy Property -
+    # він існував лише як динамічний kv-атрибут (`accent_color: ...`)
+    # у правилі <GhostButton@Button>. Через це при побудові canvas
+    # (Color: rgba: self.accent_color) Kivy іноді звертався до
+    # self.accent_color РАНІШЕ, ніж встигало відпрацювати саме kv-
+    # правило, яке його встановлює - і отримував None замість кольору,
+    # що валило застосунок одразу при старті на TypeError у
+    # Color.rgba.__set__ (бо rgba не може прийняти None).
+    # Явне оголошення ListProperty з валідним дефолтом гарантує, що
+    # властивість існує і має коректне значення ДО будь-яких kv-правил.
+    accent_color = ListProperty([0, 0, 0, 0])
 
 class AccentButton(Button):
     scale = NumericProperty(1.0)
