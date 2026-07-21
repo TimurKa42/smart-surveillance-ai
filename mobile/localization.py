@@ -39,7 +39,7 @@ TEXTS = {
         "nothing_found_photo": "Нічого не знайдено 🙁",
 
         "status_choose_video_first": "Спочатку обери відео",
-        "status_choose_model": "Обери модель праворуч (3.1 Flash-Lite або 3.5 Flash)",
+        "status_choose_model": "Обери модель (3.1 Flash-Lite або 3.5 Flash)",
         "status_write_query": "Напиши, кого або що шукати",
         "status_cutting_frames": "Нарізаю відео на кадри...",
         "status_frames_cut": "Кадрів нарізано: {count}. Питаю Gemini...",
@@ -103,7 +103,7 @@ TEXTS = {
         "nothing_found_photo": "Nothing found 🙁",
 
         "status_choose_video_first": "Please choose a video first",
-        "status_choose_model": "Choose a model on the right (3.1 Flash-Lite or 3.5 Flash)",
+        "status_choose_model": "Choose a model (3.1 Flash-Lite or 3.5 Flash)",
         "status_write_query": "Write who or what to look for",
         "status_cutting_frames": "Cutting the video into frames...",
         "status_frames_cut": "Frames cut: {count}. Asking Gemini...",
