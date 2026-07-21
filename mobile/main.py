@@ -15,6 +15,7 @@ from kivy.animation import Animation
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
 from kivy.properties import BooleanProperty, DictProperty, ListProperty, NumericProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
@@ -424,31 +425,57 @@ class LightboxModal(ModalView):
         # через pos_hint - це завжди працює однаково передбачувано.
         root = FloatLayout()
 
-        scatter = ScatterLayout(do_rotation=False)
-        img = AsyncImage(source=image_path, fit_mode="contain")
+        scatter = ScatterLayout(do_rotation=False, size_hint=(1, 1))
+        img = AsyncImage(source=image_path, fit_mode="contain", size_hint=(1, 1))
         scatter.add_widget(img)
         root.add_widget(scatter)
 
+        # "Капсула" - напівпрозора темна підкладка-таблетка під обидві
+        # кнопки (Зберегти + Закрити). Раніше кнопки висіли самі по
+        # собі поверх фото без жодного фону - при зумі/панорамуванні
+        # фото попід ними міняло яскравість, і на світлих ділянках
+        # кнопки практично губились. Тепер це один візуально цілісний
+        # плаваючий блок, який завжди читається незалежно від того,
+        # що під ним на фото.
         self.top_bar = BoxLayout(
             orientation="horizontal",
             size_hint=(None, None),
-            size=(dp(160), dp(44)),
-            spacing=dp(8),
+            size=(dp(164), dp(48)),
+            spacing=dp(6),
+            padding=[dp(6), dp(4)],
         )
+        with self.top_bar.canvas.before:
+            Color(0, 0, 0, 0.55)
+            self._capsule_bg = RoundedRectangle(pos=self.top_bar.pos, size=self.top_bar.size, radius=[dp(24)])
+        self.top_bar.bind(pos=self._update_capsule_bg, size=self._update_capsule_bg)
 
         save_btn = GhostButton(
             text=app.t("lightbox_save") if app else "Зберегти",
+            accent_color=(1, 1, 1, 0.16),
             size_hint=(None, None),
-            size=(dp(108), dp(44)),
+            size=(dp(104), dp(40)),
         )
         save_btn.bind(on_release=self.save_to_gallery)
         self.top_bar.add_widget(save_btn)
 
-        close_btn = CloseButton(size_hint=(None, None), size=(dp(44), dp(44)))
+        close_btn = CloseButton(size_hint=(None, None), size=(dp(40), dp(40)))
         close_btn.bind(on_release=self.dismiss)
         self.top_bar.add_widget(close_btn)
 
         root.add_widget(self.top_bar)
+
+        self._feedback_label = Label(
+            text="", opacity=0, size_hint=(None, None), size=(dp(220), dp(40)),
+            color=(1, 1, 1, 1), bold=True,
+        )
+        with self._feedback_label.canvas.before:
+            Color(0, 0, 0, 0.6)
+            self._feedback_bg = RoundedRectangle(
+                pos=self._feedback_label.pos, size=self._feedback_label.size, radius=[dp(18)]
+            )
+        self._feedback_label.bind(pos=self._update_feedback_bg, size=self._update_feedback_bg)
+        root.add_widget(self._feedback_label)
+
         self.add_widget(root)
 
         self._reposition_top_bar()
@@ -457,14 +484,33 @@ class LightboxModal(ModalView):
             app.bind(safe_top=self._reposition_top_bar, safe_right=self._reposition_top_bar)
         self.bind(on_dismiss=self._unbind_reposition)
 
+    def _update_capsule_bg(self, *args):
+        self._capsule_bg.pos = self.top_bar.pos
+        self._capsule_bg.size = self.top_bar.size
+
+    def _update_feedback_bg(self, *args):
+        self._feedback_bg.pos = self._feedback_label.pos
+        self._feedback_bg.size = self._feedback_label.size
+
     def _reposition_top_bar(self, *args):
         app = App.get_running_app()
+        # app.safe_top / app.safe_right вже переведені у ті самі
+        # одиниці, що dp(...) (див. get_safe_insets()) - усюди в
+        # проєкті (напр. у .kv: "dp(30) + app.safe_top") вони
+        # додаються НАПРЯМУ, без повторного огортання у dp(...).
+        # Раніше тут стояло dp(safe_right)/dp(safe_top) - подвійне
+        # застосування dp() поверх уже переведеного значення - через
+        # що капсула з кнопками зсувалась з правого верхнього кута.
         safe_top = app.safe_top if app else 0
         safe_right = app.safe_right if app else 0
         margin = dp(12)
         self.top_bar.pos = (
-            Window.width - self.top_bar.width - margin - dp(safe_right),
-            Window.height - self.top_bar.height - margin - dp(safe_top),
+            Window.width - self.top_bar.width - margin - safe_right,
+            Window.height - self.top_bar.height - margin - safe_top,
+        )
+        self._feedback_label.pos = (
+            (Window.width - self._feedback_label.width) / 2,
+            Window.height - self.top_bar.height - margin * 3,
         )
 
     def _unbind_reposition(self, *args):
@@ -474,14 +520,74 @@ class LightboxModal(ModalView):
             app.unbind(safe_top=self._reposition_top_bar, safe_right=self._reposition_top_bar)
 
     def save_to_gallery(self, *args):
+        app = App.get_running_app()
         try:
-            pics_dir = storagepath.get_pictures_dir()
-            filename = os.path.basename(self.image_path)
-            dest = os.path.join(pics_dir, filename)
-            shutil.copy(self.image_path, dest)
-            self.dismiss()
+            if platform == "android":
+                self._save_to_gallery_android()
+            else:
+                pics_dir = storagepath.get_pictures_dir()
+                filename = os.path.basename(self.image_path)
+                dest = os.path.join(pics_dir, filename)
+                shutil.copy(self.image_path, dest)
+            haptic_feedback()
+            self._show_feedback(app.t("image_saved") if app else "Saved to gallery")
         except Exception as e:
             print("Помилка збереження:", e)
+            self._show_feedback(app.t("image_save_failed") if app else "Failed to save")
+
+    def _save_to_gallery_android(self):
+        """
+        Раніше збереження робилось через shutil.copy() у теку з
+        plyer.storagepath.get_pictures_dir(). На Android 10+ (API 29+)
+        це так зване "scoped storage" - звичайний файловий запис туди
+        БЕЗ реєстрації через MediaStore або нічого не зберігає (нема
+        прав), або зберігає файл фізично, але Галерея про нього просто
+        не дізнається (MediaScanner ніхто не запускав) - тому кнопка
+        "виглядала" робочою, але фото ніде не з'являлось.
+
+        Правильний спосіб на Android - зареєструвати нове зображення
+        через ContentResolver.insert(MediaStore.Images.Media...) і
+        писати байти в отриманий Uri. Це і реєструє файл у Галереї, і
+        не потребує WRITE_EXTERNAL_STORAGE на нових Android.
+        """
+        from jnius import autoclass
+
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        ContentValues = autoclass("android.content.ContentValues")
+        MediaStoreImagesMedia = autoclass("android.provider.MediaStore$Images$Media")
+        MediaColumns = autoclass("android.provider.MediaStore$MediaColumns")
+        BuildVersion = autoclass("android.os.Build$VERSION")
+
+        activity = PythonActivity.mActivity
+        resolver = activity.getContentResolver()
+
+        filename = os.path.basename(self.image_path)
+
+        values = ContentValues()
+        values.put(MediaColumns.DISPLAY_NAME, filename)
+        values.put(MediaColumns.MIME_TYPE, "image/jpeg")
+        if BuildVersion.SDK_INT >= 29:
+            values.put(MediaColumns.RELATIVE_PATH, "Pictures/SmartSurveillance")
+
+        uri = resolver.insert(MediaStoreImagesMedia.EXTERNAL_CONTENT_URI, values)
+        if uri is None:
+            raise IOError("MediaStore insert повернув null Uri")
+
+        output_stream = resolver.openOutputStream(uri)
+        try:
+            with open(self.image_path, "rb") as source_file:
+                data = source_file.read()
+            output_stream.write(data)
+            output_stream.flush()
+        finally:
+            output_stream.close()
+
+    def _show_feedback(self, text):
+        self._feedback_label.text = text
+        self._feedback_label.opacity = 1
+        Animation.cancel_all(self._feedback_label)
+        anim = Animation(opacity=1, duration=1.1) + Animation(opacity=0, duration=0.4)
+        anim.start(self._feedback_label)
 
 
 class SetupScreen(Screen):
