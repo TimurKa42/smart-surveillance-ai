@@ -40,7 +40,7 @@ BATCH_SIZE = 40
 # у тебе платний тір - можна сміливо піднімати до 6-8.
 MAX_PARALLEL_BATCHES = 4
 
-DEFAULT_MODEL_NAME = "gemini-3.5-flash"
+DEFAULT_MODEL_NAME = "gemini-3.6-flash"
 DEFAULT_PROMPT_LANGUAGE = "ua"
 
 API_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -92,6 +92,28 @@ RESPONSE_SCHEMA = {
     },
     "required": ["matches"],
 }
+
+
+# Gemini 3.x (і 3.5 Flash-Lite, і 3.6 Flash) більше НЕ підтримує
+# temperature/top_p/top_k у generationConfig - їх треба повністю
+# прибрати з payload, інакше API повертає помилку. Замість цього
+# з'явився thinking_level (рядок: "minimal"/"low"/"medium"/"high"),
+# що керує глибиною міркувань моделі перед відповіддю.
+#
+# Для нашої задачі (структурований пошук об'єкта на кадрах, відповідь
+# суворо за JSON-схемою) глибокі роздуми не потрібні - тому свідомо
+# беремо мінімально достатній рівень для кожної моделі:
+# - Flash-Lite за замовчуванням і так найкраще працює на "minimal"
+#   (це навіть офіційно рекомендований рівень Google для задач
+#   класифікації/екстракції з високою пропускною здатністю).
+# - 3.6 Flash за замовчуванням має "medium" - для простого пошуку
+#   об'єкта в кадрі цього зайве, "low" дає ту саму точність швидше
+#   й дешевше.
+THINKING_LEVEL_BY_MODEL = {
+    "gemini-3.5-flash-lite": "minimal",
+    "gemini-3.6-flash": "low",
+}
+DEFAULT_THINKING_LEVEL = "low"
 
 
 class MissingApiKeyError(Exception):
@@ -208,7 +230,7 @@ def _analyze_batch(api_key, batch, index_offset, user_prompt, model_name, langua
         "generationConfig": {
             "response_mime_type": "application/json",
             "response_schema": RESPONSE_SCHEMA,
-            "temperature": 0.0,
+            "thinking_level": THINKING_LEVEL_BY_MODEL.get(model_name, DEFAULT_THINKING_LEVEL),
         },
     }
 
