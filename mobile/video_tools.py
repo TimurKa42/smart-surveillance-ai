@@ -1,11 +1,57 @@
 import cv2
 
+# Числові ID властивостей OpenCV, які з'явились у 4.5 (CAP_PROP_ORIENTATION_META
+# і CAP_PROP_ORIENTATION_AUTO). Дістаємо через getattr із запасним значенням,
+# бо в збірці для Android може стояти дещо старіша версія OpenCV, де цих
+# констант ще нема серед іменованих атрибутів, хоча самі числові ID стабільні.
+_CAP_PROP_ORIENTATION_META = getattr(cv2, "CAP_PROP_ORIENTATION_META", 48)
+_CAP_PROP_ORIENTATION_AUTO = getattr(cv2, "CAP_PROP_ORIENTATION_AUTO", 49)
+
+
+def _prepare_orientation(video):
+    """
+    Телефонні відео майже завжди мають метадані повороту - камеру
+    тримали "на боці", а плеєр показує відео вертикально/горизонтально
+    ЗАВДЯКИ цій метадані. OpenCV за замовчуванням її ІГНОРУЄ і віддає
+    сирі, неповернуті кадри.
+
+    Спочатку пробуємо попросити OpenCV повертати кадри самостійно
+    (CAP_PROP_ORIENTATION_AUTO). Якщо це не спрацювало (стара збірка
+    без підтримки) - зчитуємо кут з метаданих і повертаємо кадри
+    вручну через _apply_manual_rotation().
+    """
+    try:
+        auto_ok = bool(video.set(_CAP_PROP_ORIENTATION_AUTO, 1))
+    except Exception:
+        auto_ok = False
+
+    if auto_ok:
+        return 0
+
+    try:
+        angle = int(video.get(_CAP_PROP_ORIENTATION_META)) % 360
+    except Exception:
+        angle = 0
+    return angle
+
+
+def _apply_manual_rotation(frame, angle):
+    if angle == 90:
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    if angle == 180:
+        return cv2.rotate(frame, cv2.ROTATE_180)
+    if angle == 270:
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return frame
+
+
 def format_time(seconds):
     total_seconds = int(seconds)
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
     secs = total_seconds % 60
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
 
 def resize_frame(frame, max_width=1024):
     height, width = frame.shape[:2]
@@ -15,23 +61,79 @@ def resize_frame(frame, max_width=1024):
     new_size = (max_width, int(height * scale))
     return cv2.resize(frame, new_size)
 
+
+# Роздільна здатність, у якій кадри їдуть у Gemini. Моделі не потрібно
+# 4K/FullHD, щоб зрозуміти "це машина" чи "це людина" - а токенів на
+# зображення у мультимодальних моделей зазвичай тим більше, чим вища
+# роздільна здатність (картинка ріжеться на патчі). Роздільна здатність
+# вихідного відео при цьому ніде не втрачається - grab_screenshot()
+# завжди бере кадр заново з відеофайлу в оригінальній якості, для
+# показу/зуму в інтерфейсі.
 GEMINI_FRAME_WIDTH = 640
+
+# На скільки відсотків пікселів має змінитись яскравість між кадрами,
+# щоб вважати це "рухом", а не шумом матриці камери/вітром у листі.
 MOTION_THRESHOLD_PERCENT = 2.0
+
+# Навіть якщо руху нема - все одно беремо кадр раз на стільки "перевірок".
+# Це страховка: наприклад, людина впала і лежить нерухомо - після
+# падіння руху на кадрах уже нема, але кадр з нею все одно потрібен
+# у звіті. Без цієї страховки чиста детекція руху таке пропустить.
 FORCE_KEEP_EVERY = 12
+
+# У скільки разів частіше, ніж підсумковий ліміт max_frames, ми
+# перевіряємо кандидатів на кадр. Детектору руху потрібно з чого
+# вибирати - якщо семплювати так само рідко, як раніше (без детекції),
+# вибирати буде нема з чого і вся економія токенів пропаде намарно.
 CANDIDATE_OVERSAMPLE = 3
 
+
 def _has_motion(prev_gray, current_gray, threshold_percent=MOTION_THRESHOLD_PERCENT):
+    """
+    Порівнює два кадри (у відтінках сірого) і визначає, чи було між
+    ними помітне переміщення.
+
+    cv2.absdiff рахує різницю яскравості піксель до пікселя. Далі
+    бінаризуємо різницю (поріг 25 - це "помітна" зміна, а не шум
+    матриці) і рахуємо, який відсоток пікселів кадру реально змінився.
+    """
     diff = cv2.absdiff(prev_gray, current_gray)
     _, diff_mask = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+
     changed_pixels = cv2.countNonZero(diff_mask)
     total_pixels = diff_mask.shape[0] * diff_mask.shape[1]
     percent_changed = (changed_pixels / total_pixels) * 100
+
     return percent_changed >= threshold_percent
 
+
 def extract_frames(video_path, max_frames=300, min_interval_sec=0.5):
+    """
+    Швидка й "розумна" нарізка відео на кадри для відправки в Gemini.
+
+    Тут ДВІ сходинки економії:
+
+    1) Швидке читання без сикання - відео читається ПОСЛІДОВНО:
+       video.grab() дешево прогортає кадр без декодування,
+       video.retrieve() декодує картинку лише у "кандидатів"
+       (раз на interval_frames).
+
+    2) Детекція руху (cv2.absdiff) - з кандидатів у підсумковий набір
+       потрапляють лише ті, де картинка помітно змінилась порівняно
+       з останнім ВЗЯТИМ кадром. Статичні шматки відео (де нічого не
+       відбувається) майже не витрачають токени Gemini. Кандидатів при
+       цьому перевіряємо густіше (CANDIDATE_OVERSAMPLE), щоб детектору
+       було з чого обирати, а FORCE_KEEP_EVERY підстраховує від
+       пропуску статичних об'єктів (див. коментар біля константи вище).
+
+    Підсумкових кадрів завжди буде НЕ БІЛЬШЕ max_frames, але зазвичай
+    помітно менше - рівно стільки, скільки реально знадобилось.
+    """
     video = cv2.VideoCapture(video_path)
     if not video.isOpened():
         raise ValueError(f"Не вдалось відкрити відео: {video_path}")
+
+    manual_rotation = _prepare_orientation(video)
 
     fps = video.get(cv2.CAP_PROP_FPS) or 25.0
     total_frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -43,8 +145,8 @@ def extract_frames(video_path, max_frames=300, min_interval_sec=0.5):
 
     frames = []
     frame_index = 0
-    last_kept_gray = None
-    skipped_in_a_row = 0
+    last_kept_gray = None   # кадр (у відтінках сірого), з яким порівнюємо
+    skipped_in_a_row = 0    # скільки кандидатів підряд пропустили без руху
 
     while True:
         success = video.grab()
@@ -54,10 +156,8 @@ def extract_frames(video_path, max_frames=300, min_interval_sec=0.5):
         if frame_index % interval_frames == 0:
             success, frame = video.retrieve()
             if success:
-                # Обов'язковий поворот, якщо відео вертикальне
-                if frame.shape[0] > frame.shape[1]:
-                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-
+                if manual_rotation:
+                    frame = _apply_manual_rotation(frame, manual_rotation)
                 gemini_frame = resize_frame(frame, max_width=GEMINI_FRAME_WIDTH)
                 gray = cv2.cvtColor(gemini_frame, cv2.COLOR_BGR2GRAY)
 
@@ -86,17 +186,45 @@ def extract_frames(video_path, max_frames=300, min_interval_sec=0.5):
     video.release()
     return frames
 
+
 def grab_screenshot(video_path, timestamp_sec, save_path):
+    """
+    Дістає один кадр за часовою міткою і зберігає як є, без рамок,
+    в ОРИГІНАЛЬНІЙ якості (тут роздільну здатність НЕ стискаємо, на
+    відміну від кадрів, які їдуть у Gemini) - щоб в інтерфейсі можна
+    було дивитись і зумити чітку картинку.
+
+    ВАЖЛИВО: раніше тут використовувався video.set(CAP_PROP_POS_MSEC).
+    На багатьох Android-збірках OpenCV цей seek або "прилипає" до
+    найближчого опорного кадру (keyframe) - вони в телефонних
+    H.264-роликах стоять рідко, - або взагалі мовчки НЕ спрацьовує,
+    і читання просто продовжується з поточної позиції (для щойно
+    відкритого VideoCapture це позиція 0) - тому в звіті всім
+    моментам підставлявся один і той самий, перший кадр відео.
+
+    Натомість гортаємо кадри послідовно через grab() (дешева операція
+    без декодування) до потрібного індексу і декодуємо лише останній -
+    так само, як робить extract_frames(). Повільніше за прямий seek,
+    зате завжди повертає справді той кадр, що треба.
+    """
     video = cv2.VideoCapture(video_path)
-    video.set(cv2.CAP_PROP_POS_MSEC, timestamp_sec * 1000)
+    manual_rotation = _prepare_orientation(video)
+
+    fps = video.get(cv2.CAP_PROP_FPS) or 25.0
+    target_frame_index = max(0, int(round(timestamp_sec * fps)))
+
+    frame_index = 0
+    ok = True
+    while frame_index < target_frame_index and ok:
+        ok = video.grab()
+        frame_index += 1
+
     success, frame = video.read()
     video.release()
 
     if success:
-        # Обов'язковий поворот для скріншотів, якщо відео вертикальне
-        if frame.shape[0] > frame.shape[1]:
-            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-            
+        if manual_rotation:
+            frame = _apply_manual_rotation(frame, manual_rotation)
         cv2.imwrite(save_path, frame)
         return True
 
