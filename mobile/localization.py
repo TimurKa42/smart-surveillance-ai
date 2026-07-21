@@ -50,7 +50,8 @@ TEXTS = {
         "nothing_found_list": "Нічого не знайдено",
         "nothing_found_description": "За запитом «{query}» на відео нічого не знайдено.",
 
-        "lightbox_close": "✕ Закрити",
+        "lightbox_close": "Закрити",
+        "lightbox_save": "Зберегти",
 
         "file_dialog_title": "Обери відео",
         "file_dialog_video_files": "Відеофайли",
@@ -103,7 +104,8 @@ TEXTS = {
         "nothing_found_list": "Nothing found",
         "nothing_found_description": "Nothing was found in the video for the query \u201c{query}\u201d.",
 
-        "lightbox_close": "✕ Close",
+        "lightbox_close": "Close",
+        "lightbox_save": "Save",
 
         "file_dialog_title": "Choose a video",
         "file_dialog_video_files": "Video files",
