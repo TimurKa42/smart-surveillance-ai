@@ -8,7 +8,7 @@ import shutil
 from kivy.uix.modalview import ModalView
 from kivy.uix.scatterlayout import ScatterLayout
 from kivy.uix.image import AsyncImage
-from plyer import vibrator, storagepath
+from plyer import storagepath
 
 from kivy.animation import Animation
 from kivy.app import App
@@ -46,6 +46,12 @@ MODEL_OPTIONS = [
 def animate_press(widget):
     Animation.cancel_all(widget, "scale")
     Animation(scale=0.96, duration=0.08, t="out_quad").start(widget)
+    # Легка мікровібрація на дотик - animate_press викликається з
+    # on_press буквально КОЖНОЇ кастомної кнопки в застосунку
+    # (GhostButton, AccentButton, ModelButton, ThemeChipButton,
+    # ReportItemButton, CloseButton), тому це єдина точка, а не
+    # окремі виклики в кожному обробнику.
+    haptic_feedback()
 
 
 def animate_release(widget):
@@ -117,26 +123,72 @@ def get_safe_insets():
         return 0, 0, 0, 0
 
 
-def haptic_feedback(strength=None):
+def haptic_feedback(amplitude=None, duration_ms=15):
+    """
+    ВАЖЛИВО: раніше "сила вібрації" керувала лише ТРИВАЛІСТЮ виклику
+    plyer.vibrator.vibrate(sec) (0-0.1 сек). Різниця між, наприклад,
+    0.03с і 0.08с на дотик практично непомітна - звідси і скарга, що
+    "повзунок не працює". plyer взагалі не вміє керувати амплітудою.
+
+    Тепер викликаємо android.os.Vibrator напряму через pyjnius і, якщо
+    версія Android дозволяє (8.0+, API 26+), керуємо РЕАЛЬНОЮ амплітудою
+    мотора через VibrationEffect.createOneShot(ms, amplitude). Це і є
+    справжня "сила" вібрації, а не тривалість.
+
+    amplitude: 0.0-1.0 (якщо None - береться app.vibration_strength)
+    duration_ms: тривалість одного імпульсу в мілісекундах (за
+    замовчуванням - легка мікровібрація на дотик до кнопки).
+    """
+    if platform != "android":
+        return
+
+    app = App.get_running_app()
+    if app is not None and not app.vibration_enabled:
+        return
+
+    if amplitude is None:
+        amplitude = app.vibration_strength if app is not None else 0.6
+    amplitude = max(0.0, min(1.0, amplitude))
+    if amplitude <= 0:
+        return
+
     try:
-        if platform == "android":
-            if strength is None:
-                app = App.get_running_app()
-                strength = app.vibration if app else 0.05
-            if strength > 0:
-                vibrator.vibrate(strength)
+        from jnius import autoclass
+
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Context = autoclass("android.content.Context")
+        BuildVersion = autoclass("android.os.Build$VERSION")
+
+        activity = PythonActivity.mActivity
+        vib_service = activity.getSystemService(Context.VIBRATOR_SERVICE)
+        if vib_service is None:
+            return
+
+        if BuildVersion.SDK_INT >= 26:
+            VibrationEffect = autoclass("android.os.VibrationEffect")
+            amplitude_int = max(1, min(255, round(amplitude * 255)))
+            effect = VibrationEffect.createOneShot(duration_ms, amplitude_int)
+            vib_service.vibrate(effect)
+        else:
+            # Старі версії Android не вміють в амплітуду - лишається
+            # звичайна вібрація фіксованої "сили", керована лише часом.
+            vib_service.vibrate(duration_ms)
     except Exception:
         pass
+
+
+def haptic_feedback_report_ready():
+    """Легка вібрація протягом ~2 секунд, коли звіт готовий."""
+    haptic_feedback(duration_ms=2000)
 
 
 class SettingsModal(ModalView):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.size_hint = (1, 0.45)
-        # 'bottom' - НЕ валідний ключ pos_hint у Kivy (валідні: x, y,
-        # center_x, center_y, right, top). Через це шторка ігнорувала
-        # прив'язку до низу екрана і відкривалась по центру. Правильний
-        # спосіб прижати знизу - y: 0.
+        # Висота НЕ фіксована часткою екрана - вона рахується в .kv
+        # (height: content.height) під реальний контент, тому зверху
+        # над "Налаштування" більше нема порожнього простору.
+        self.size_hint = (1, None)
         self.pos_hint = {'x': 0, 'y': 0}
         self.background_color = (0, 0, 0, 0)
 
@@ -148,13 +200,15 @@ class SettingsModal(ModalView):
 
     def reset_app(self):
         app = App.get_running_app()
-        haptic_feedback(0.1)
         config.save_api_key("")
         self.dismiss()
         app.root.current = "setup"
 
     def test_vibrate(self, instance, value):
-        haptic_feedback(value)
+        # Довший імпульс (150мс), ніж звичайна мікровібрація на дотик
+        # (15мс) - інакше різницю в амплітуді на повзунку майже не
+        # відчутно, і повзунок знову здаватиметься "неробочим".
+        haptic_feedback(amplitude=value, duration_ms=150)
 
 
 class LightboxModal(ModalView):
@@ -201,7 +255,6 @@ class LightboxModal(ModalView):
 
     def save_to_gallery(self, *args):
         try:
-            haptic_feedback(0.05)
             pics_dir = storagepath.get_pictures_dir()
             filename = os.path.basename(self.image_path)
             dest = os.path.join(pics_dir, filename)
@@ -439,6 +492,8 @@ class MainScreen(Screen):
     def _show_results(self, results, prompt_text):
         app = App.get_running_app()
 
+        haptic_feedback_report_ready()
+
         self.ids.start_btn.disabled = False
         self.ids.status_label.text = app.t("status_done", count=len(results))
         self.results = results
@@ -498,7 +553,10 @@ class SmartSurveillanceApp(App):
     theme_name = StringProperty("auto")
     language = StringProperty("ua")
     palette = DictProperty(theme.DARK)
-    vibration = NumericProperty(0.05) # Добавили свойство вибрации
+    # Сила вібрації (амплітуда, 0..1) - раніше називалось "vibration"
+    # і було тривалістю в секундах, тепер це амплітуда мотора.
+    vibration_strength = NumericProperty(0.6)
+    vibration_enabled = BooleanProperty(True)
 
     is_landscape = BooleanProperty(False)
     window_width = NumericProperty(360)
@@ -517,7 +575,8 @@ class SmartSurveillanceApp(App):
         self.loc = Localization(settings["language"])
         self.language = settings["language"]
         self.theme_name = settings["theme"]
-        self.vibration = settings.get("vibration", 0.05)
+        self.vibration_strength = settings.get("vibration", 0.6)
+        self.vibration_enabled = settings.get("vibration_enabled", True)
         self.palette = theme.resolve(self.theme_name)
         Window.clearcolor = self.palette["bg"]
 
@@ -537,33 +596,35 @@ class SmartSurveillanceApp(App):
         return sm
 
     def open_settings(self):
-        haptic_feedback(0.05)
         SettingsModal().open()
 
     def safe_set_language(self, lang):
-        haptic_feedback(0.05)
         self.set_language(lang)
 
     def safe_set_theme(self, theme_val):
-        haptic_feedback(0.05)
         self.set_theme(theme_val)
 
+    def toggle_vibration(self, enabled):
+        self.vibration_enabled = enabled
+        self._persist_settings()
+
     def save_vibration(self, value):
-        self.vibration = value
+        self.vibration_strength = value
         self._persist_settings()
 
     def _persist_settings(self):
         """
-        Зберігає ВСІ три налаштування одразу (тема + мова + вібрація).
-        save_settings() перезаписує файл цілком - якщо зберігати лише
-        один ключ (як робив set_theme() раніше), попередньо збережені
-        значення інших губляться. Єдина точка збереження прибирає цей
-        клас багів назавжди.
+        Зберігає ВСІ чотири налаштування одразу (тема + мова + сила
+        вібрації + увімкнена/вимкнена). save_settings() перезаписує
+        файл цілком - якщо зберігати лише один ключ, попередньо
+        збережені значення інших губляться. Єдина точка збереження
+        прибирає цей клас багів назавжди.
         """
         settings_store.save_settings({
             "theme": self.theme_name,
             "language": self.language,
-            "vibration": self.vibration,
+            "vibration": self.vibration_strength,
+            "vibration_enabled": self.vibration_enabled,
         })
 
     def t(self, key, **kwargs):
