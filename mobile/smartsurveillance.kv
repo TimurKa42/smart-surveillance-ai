@@ -84,16 +84,16 @@
         PopMatrix
 
 <ReportItemButton>:
-    background_normal: ""
-    background_down: ""
-    background_color: 0, 0, 0, 0
-    color: (1, 1, 1, 1) if self.is_selected else app.palette["text"]
-    text_size: self.width - dp(24), None
-    halign: "left"
-    valign: "top"
+    # Композит із двох Label замість одного тексту з "\n":
+    # time_lbl (id time_lbl) НІКОЛИ не переноситься (text_size: None, None
+    # означає "без обмеження ширини для переносу", а власна ширина
+    # підганяється під texture_size) - тому "00:00:09" завжди в один
+    # рядок. desc_lbl, навпаки, переноситься як і раніше.
+    orientation: "horizontal"
     padding: [dp(12), dp(10)]
-    font_size: "13sp"
-    height: self.texture_size[1] + dp(20)
+    spacing: dp(10)
+    size_hint_y: None
+    height: max(time_lbl.texture_size[1], desc_lbl.texture_size[1]) + dp(20)
     on_press: animate_press(self)
     on_release: animate_release(self)
     canvas.before:
@@ -110,6 +110,27 @@
             radius: [dp(10)]
     canvas.after:
         PopMatrix
+
+    Label:
+        id: time_lbl
+        text: root.time_text
+        color: (1, 1, 1, 1) if root.is_selected else app.palette["text"]
+        font_size: "13sp"
+        bold: True
+        size_hint_x: None
+        width: self.texture_size[0]
+        text_size: None, None
+        halign: "left"
+        valign: "top"
+
+    Label:
+        id: desc_lbl
+        text: root.desc_text
+        color: (1, 1, 1, 1) if root.is_selected else app.palette["text"]
+        font_size: "13sp"
+        text_size: self.width, None
+        halign: "left"
+        valign: "top"
 
 <ThemeChipButton>:
     background_normal: ""
@@ -133,6 +154,37 @@
             pos: self.pos
             size: self.size
             radius: [dp(9)]
+    canvas.after:
+        PopMatrix
+
+<CloseButton>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    text: ""
+    on_press: animate_press(self)
+    on_release: animate_release(self)
+    canvas.before:
+        PushMatrix
+        Scale:
+            origin: self.center
+            x: self.scale
+            y: self.scale
+        Color:
+            rgba: 0, 0, 0, 0.55
+        Ellipse:
+            pos: self.pos
+            size: self.size
+        Color:
+            rgba: 1, 1, 1, 1
+        Line:
+            points: [self.x + dp(13), self.y + dp(13), self.x + self.width - dp(13), self.y + self.height - dp(13)]
+            width: dp(1.6)
+            cap: "round"
+        Line:
+            points: [self.x + dp(13), self.y + self.height - dp(13), self.x + self.width - dp(13), self.y + dp(13)]
+            width: dp(1.6)
+            cap: "round"
     canvas.after:
         PopMatrix
 
