@@ -422,13 +422,13 @@
                 spacing: dp(6)
 
                 ModelButton:
-                    text: "3.1 Flash-Lite"
-                    model_name: "gemini-3.1-flash-lite"
+                    text: "3.5 Flash-Lite"
+                    model_name: "gemini-3.5-flash-lite"
                     on_release: root.select_model(self.model_name)
 
                 ModelButton:
-                    text: "3.5 Flash"
-                    model_name: "gemini-3.5-flash"
+                    text: "3.6 Flash"
+                    model_name: "gemini-3.6-flash"
                     on_release: root.select_model(self.model_name)
 
         SubtleLabel:
@@ -480,6 +480,57 @@
                             radius: [dp(10)]
                     on_touch_down:
                         if self.collide_point(*args[1].pos) and self.opacity == 1: root.open_lightbox(self.source)
+
+<ConfirmModal>:
+    size_hint: (0.85, None)
+    height: content.height
+    background_color: 0, 0, 0, 0.5
+    pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+
+    BoxLayout:
+        id: content
+        orientation: "vertical"
+        size_hint_y: None
+        height: self.minimum_height
+        padding: dp(20)
+        spacing: dp(16)
+        canvas.before:
+            Color:
+                rgba: app.palette["surface"]
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(18)]
+
+        RoundedLabel:
+            text: root.message_text
+            font_size: "15sp"
+            halign: "center"
+            valign: "middle"
+            text_size: self.width, None
+            size_hint_y: None
+            height: max(dp(40), self.texture_size[1] + dp(8))
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(46)
+            spacing: dp(10)
+
+            GhostButton:
+                text: "Ні" if app.language == 'ua' else "No"
+                bold: True
+                on_press: haptic_feedback()
+                on_release: root.dismiss()
+
+            Button:
+                text: "Так" if app.language == 'ua' else "Yes"
+                background_normal: ""
+                background_down: ""
+                background_color: app.palette["danger"]
+                color: 1, 1, 1, 1
+                bold: True
+                on_press: haptic_feedback()
+                on_release: root.confirm()
 
 <SettingsModal>:
     # Раніше висота шторки була фіксованою часткою екрана (0.45), і
