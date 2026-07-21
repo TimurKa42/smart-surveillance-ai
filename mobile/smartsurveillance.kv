@@ -87,12 +87,13 @@
     background_normal: ""
     background_down: ""
     background_color: 0, 0, 0, 0
-    color: 1, 1, 1, 1
-    text_size: self.width - dp(10), None
+    color: (1, 1, 1, 1) if self.is_selected else app.palette["text"]
+    text_size: self.width - dp(24), None
     halign: "left"
     valign: "top"
-    padding: [dp(12), dp(8)]
+    padding: [dp(12), dp(10)]
     font_size: "13sp"
+    height: self.texture_size[1] + dp(20)
     on_press: animate_press(self)
     on_release: animate_release(self)
     canvas.before:
@@ -138,10 +139,10 @@
 <TopBar@BoxLayout>:
     size_hint_y: None
     height: dp(40)
-    
+
     Widget:
         size_hint_x: 1
-        
+
     GhostButton:
         # Убрали эмодзи, используем текст
         text: "Меню" if app.language == 'ua' else "Menu"
@@ -191,7 +192,7 @@
         RelativeLayout:
             size_hint_y: None
             height: dp(52)
-            
+
             TextInput:
                 id: api_key_input
                 hint_text: app.language and app.t("api_key_placeholder")
@@ -204,7 +205,7 @@
                 cursor_color: app.palette["text"]
                 # Увеличили отступ справа под более широкую текстовую кнопку
                 padding: [dp(16), dp(14), dp(80), dp(14)]
-                
+
             GhostButton:
                 id: eye_btn
                 text: "Показати" if app.language == 'ua' else "Show"
@@ -421,7 +422,7 @@
                 pos: self.pos
                 size: self.size
                 radius: [dp(20), dp(20), 0, 0]
-                
+
         RelativeLayout:
             size_hint_y: None
             height: dp(40)
@@ -438,7 +439,7 @@
                 size: (dp(40), dp(40))
                 pos_hint: {'right': 1, 'center_y': 0.5}
                 on_release: root.dismiss()
-            
+
         BoxLayout:
             size_hint_y: None
             height: dp(40)
@@ -455,7 +456,7 @@
                 text: "Темна" if app.language == 'ua' else "Dark"
                 is_selected: app.theme_name == "dark"
                 on_release: app.safe_set_theme("dark")
-                
+
         BoxLayout:
             size_hint_y: None
             height: dp(40)
@@ -480,10 +481,13 @@
                 max: 0.1
                 value: app.vibration
                 on_value: app.save_vibration(self.value); root.test_vibrate(self, self.value)
-                
+
         Button:
             text: "Скинути API Ключ" if app.language == 'ua' else "Reset API Key"
             background_normal: ""
+            background_down: ""
+            color: 1, 1, 1, 1
+            bold: True
             background_color: app.palette["danger"]
             size_hint_y: None
             height: dp(45)
