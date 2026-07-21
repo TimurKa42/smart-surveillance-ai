@@ -130,13 +130,23 @@ class SettingsModal(ModalView):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.size_hint = (1, 0.45)
-        self.pos_hint = {'bottom': 1}
+        # 'bottom' - НЕ валідний ключ pos_hint у Kivy (валідні: x, y,
+        # center_x, center_y, right, top). Через це шторка ігнорувала
+        # прив'язку до низу екрана і відкривалась по центру. Правильний
+        # спосіб прижати знизу - y: 0.
+        self.pos_hint = {'x': 0, 'y': 0}
         self.background_color = (0, 0, 0, 0)
-        
+
+    def on_open(self):
+        """Плавний виїзд шторки знизу вгору замість миттєвої появи."""
+        target_y = self.y
+        self.y = -self.height
+        Animation(y=target_y, duration=0.22, t="out_cubic").start(self)
+
     def reset_app(self):
         app = App.get_running_app()
         haptic_feedback(0.1)
-        config.save_api_key("") 
+        config.save_api_key("")
         self.dismiss()
         app.root.current = "setup"
 
@@ -150,16 +160,16 @@ class LightboxModal(ModalView):
         self.image_path = image_path
         self.size_hint = (1, 1)
         self.background_color = (0, 0, 0, 0.9)
-        
+
         scatter = ScatterLayout(do_rotation=False)
         img = AsyncImage(source=image_path, fit_mode="contain")
         scatter.add_widget(img)
         self.add_widget(scatter)
-        
+
         close_btn = GhostButton(text="✕ Закрити", size_hint=(None, None), size=(dp(100), dp(40)), pos_hint={'top': 0.95, 'right': 0.95})
         close_btn.bind(on_release=self.dismiss)
         self.add_widget(close_btn)
-        
+
         save_btn = AccentButton(text="📥 Зберегти", size_hint=(None, None), size=(dp(120), dp(40)), pos_hint={'bottom': 0.05, 'center_x': 0.5})
         save_btn.bind(on_release=self.save_to_gallery)
         self.add_widget(save_btn)
@@ -191,7 +201,7 @@ class SetupScreen(Screen):
         config.save_api_key(key)
         self.error_text = ""
         app.go_to_main_screen()
-        
+
     def toggle_password(self):
         inp = self.ids.api_key_input
         inp.password = not inp.password
@@ -218,7 +228,7 @@ class ThemeChipButton(Button):
 
 class GhostButton(Button):
     scale = NumericProperty(1.0)
-    
+
 class AccentButton(Button):
     scale = NumericProperty(1.0)
 
@@ -255,10 +265,22 @@ class MainScreen(Screen):
         )
 
     def _on_video_selected(self, selection):
+        """
+        На Android колбек від plyer іноді відпрацьовує НЕ в головному
+        (GL) потоці Kivy. Пряме встановлення властивостей віджетів з
+        чужого потоку могло тихо "губитись" - схоже, саме це спричиняло
+        баг "після Очистити все відео більше не обирається". Тому
+        загортаємо в Clock.schedule_once, який гарантовано виконує код
+        у головному потоці.
+        """
         if not selection:
             return
-        self.video_path = selection[0]
-        self.ids.file_label.text = os.path.basename(self.video_path)
+        path = selection[0]
+        Clock.schedule_once(lambda dt: self._apply_video_selection(path))
+
+    def _apply_video_selection(self, path):
+        self.video_path = path
+        self.ids.file_label.text = os.path.basename(path)
 
     def select_model(self, model_name):
         self.selected_model = model_name
@@ -289,10 +311,10 @@ class MainScreen(Screen):
         self.ids.status_label.text = ""
         self.ids.report_list.clear_widgets()
         self.ids.description_label.text = ""
-        
+
         self.ids.screenshot_image.source = ""
-        self.ids.screenshot_image.opacity = 0 
-        
+        self.ids.screenshot_image.opacity = 0
+
         self.ids.start_btn.disabled = False
         self._refresh_model_buttons()
 
@@ -389,10 +411,13 @@ class MainScreen(Screen):
             return
 
         for index, result in enumerate(results):
+            # Висота більше НЕ фіксована (dp(64)) - вона підганяється
+            # під реальний текст у .kv (bind до texture_size). Раніше
+            # довгі описи або обрізались до 45 символів, або вилазили
+            # за межі фіксованої висоти кнопки.
             btn = ReportItemButton(
-                text=f"{result['time_str']}\n{result['description'][:45]}",
+                text=f"{result['time_str']}\n{result['description']}",
                 size_hint_y=None,
-                height=dp(64),
             )
             btn.bind(on_release=lambda instance, i=index: self.show_result(i))
             self.ids.report_list.add_widget(btn)
@@ -467,20 +492,32 @@ class SmartSurveillanceApp(App):
     def open_settings(self):
         haptic_feedback(0.05)
         SettingsModal().open()
-        
+
     def safe_set_language(self, lang):
         haptic_feedback(0.05)
         self.set_language(lang)
-        
+
     def safe_set_theme(self, theme_val):
         haptic_feedback(0.05)
         self.set_theme(theme_val)
 
     def save_vibration(self, value):
         self.vibration = value
-        settings = settings_store.load_settings()
-        settings["vibration"] = value
-        settings_store.save_settings(settings)
+        self._persist_settings()
+
+    def _persist_settings(self):
+        """
+        Зберігає ВСІ три налаштування одразу (тема + мова + вібрація).
+        save_settings() перезаписує файл цілком - якщо зберігати лише
+        один ключ (як робив set_theme() раніше), попередньо збережені
+        значення інших губляться. Єдина точка збереження прибирає цей
+        клас багів назавжди.
+        """
+        settings_store.save_settings({
+            "theme": self.theme_name,
+            "language": self.language,
+            "vibration": self.vibration,
+        })
 
     def t(self, key, **kwargs):
         return self.loc.t(key, **kwargs)
@@ -502,12 +539,20 @@ class SmartSurveillanceApp(App):
         self.theme_name = theme_name
         self.palette = theme.resolve(theme_name)
         Window.clearcolor = self.palette["bg"]
-        settings_store.save_settings({"theme": theme_name, "language": self.language})
+        self._persist_settings()
 
     def set_language(self, language):
-        self.language = language
+        # ВАЖЛИВО: спершу оновлюємо self.loc (звичайний Python-об'єкт,
+        # сам по собі НЕ запускає перемальовування .kv), і лише ПОТІМ
+        # self.language (це Kivy Property - саме її зміна змушує .kv
+        # перечитати app.t(...) по всьому екрану). Якщо зробити навпаки
+        # (як було) - .kv встигає перечитати тексти ДО того, як self.loc
+        # дізнався про нову мову, тому підсвітка кнопки "стрибає" на
+        # нову мову, а самі тексти лишаються зі старої - це і був баг
+        # "інверсії" UA/EN.
         self.loc.set_language(language)
-        settings_store.save_settings({"theme": self.theme_name, "language": language})
+        self.language = language
+        self._persist_settings()
 
         if self.root:
             try:
