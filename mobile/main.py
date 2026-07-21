@@ -16,9 +16,12 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.properties import BooleanProperty, DictProperty, NumericProperty, StringProperty
+from kivy.uix.behaviors import ButtonBehavior
+from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.screenmanager import FadeTransition, Screen, ScreenManager
 from kivy.uix.button import Button
 from kivy.uix.label import Label
+from kivy.uix.widget import Widget
 from kivy.utils import platform
 
 import config
@@ -166,13 +169,35 @@ class LightboxModal(ModalView):
         scatter.add_widget(img)
         self.add_widget(scatter)
 
-        close_btn = GhostButton(text="✕ Закрити", size_hint=(None, None), size=(dp(100), dp(40)), pos_hint={'top': 0.95, 'right': 0.95})
-        close_btn.bind(on_release=self.dismiss)
-        self.add_widget(close_btn)
+        app = App.get_running_app()
 
-        save_btn = AccentButton(text="📥 Зберегти", size_hint=(None, None), size=(dp(120), dp(40)), pos_hint={'bottom': 0.05, 'center_x': 0.5})
+        # Верхня панель праворуч: "Зберегти" ЛІВОРУЧ від кнопки закриття
+        # (як і просили) - обидві кнопки в одному рядку у правому
+        # верхньому куті, а не розкидані по різних кутах екрана, як
+        # було раніше (AccentButton внизу по центру).
+        top_bar = BoxLayout(
+            orientation="horizontal",
+            size_hint=(1, None),
+            height=dp(56),
+            pos_hint={'top': 1},
+            padding=[dp(12), dp(8), dp(12), dp(8)],
+            spacing=dp(10),
+        )
+        top_bar.add_widget(Widget(size_hint_x=1))  # спейсер, притискає кнопки праворуч
+
+        save_btn = GhostButton(
+            text=app.t("lightbox_save") if app else "Зберегти",
+            size_hint=(None, None),
+            size=(dp(110), dp(40)),
+        )
         save_btn.bind(on_release=self.save_to_gallery)
-        self.add_widget(save_btn)
+        top_bar.add_widget(save_btn)
+
+        close_btn = CloseButton(size_hint=(None, None), size=(dp(40), dp(40)))
+        close_btn.bind(on_release=self.dismiss)
+        top_bar.add_widget(close_btn)
+
+        self.add_widget(top_bar)
 
     def save_to_gallery(self, *args):
         try:
@@ -218,9 +243,18 @@ class ModelButton(Button):
     model_name = StringProperty("")
     scale = NumericProperty(1.0)
 
-class ReportItemButton(Button):
+class ReportItemButton(ButtonBehavior, BoxLayout):
+    """
+    Раніше це був звичайний Button з text = "час\\nопис" - через це
+    ЧАС теж переносився на новий рядок, коли не вміщався по ширині
+    (наприклад "00:00:0" / "9"). Тепер це композитний віджет з двома
+    окремими Label: time_text (НІКОЛИ не переноситься, ширина
+    підганяється під сам текст) і desc_text (переноситься як завжди).
+    """
     is_selected = BooleanProperty(False)
     scale = NumericProperty(1.0)
+    time_text = StringProperty("")
+    desc_text = StringProperty("")
 
 class ThemeChipButton(Button):
     is_selected = BooleanProperty(False)
@@ -230,6 +264,17 @@ class GhostButton(Button):
     scale = NumericProperty(1.0)
 
 class AccentButton(Button):
+    scale = NumericProperty(1.0)
+
+class CloseButton(Button):
+    """
+    Кнопка закриття лайтбоксу. Раніше хрестик малювався текстовим
+    символом "✕" - на деяких системних шрифтах Android цей гліф
+    відсутній і замість нього рендериться "тофу"-прямокутник (саме це
+    і виглядало як "перекреслений прямокутник" на скріні). Тепер
+    хрестик малюється вручну двома лініями в canvas .kv-правила -
+    він не залежить від того, чи є потрібний символ у шрифті.
+    """
     scale = NumericProperty(1.0)
 
 
@@ -414,9 +459,11 @@ class MainScreen(Screen):
             # Висота більше НЕ фіксована (dp(64)) - вона підганяється
             # під реальний текст у .kv (bind до texture_size). Раніше
             # довгі описи або обрізались до 45 символів, або вилазили
-            # за межі фіксованої висоти кнопки.
+            # за межі фіксованої висоти кнопки. time_text і desc_text
+            # тепер окремі поля - час більше ніколи не переноситься.
             btn = ReportItemButton(
-                text=f"{result['time_str']}\n{result['description']}",
+                time_text=result["time_str"],
+                desc_text=result["description"],
                 size_hint_y=None,
             )
             btn.bind(on_release=lambda instance, i=index: self.show_result(i))
