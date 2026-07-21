@@ -206,6 +206,10 @@ def grab_screenshot(video_path, timestamp_sec, save_path):
     без декодування) до потрібного індексу і декодуємо лише останній -
     так само, як робить extract_frames(). Повільніше за прямий seek,
     зате завжди повертає справді той кадр, що треба.
+
+    ПРИМІТКА: якщо потрібно дістати ДЕКІЛЬКА кадрів з одного відео
+    (як у звіті аналізу) - використовуй grab_screenshots_batch()
+    нижче, вона відкриває файл лише ОДИН раз замість N.
     """
     video = cv2.VideoCapture(video_path)
     manual_rotation = _prepare_orientation(video)
@@ -229,3 +233,57 @@ def grab_screenshot(video_path, timestamp_sec, save_path):
         return True
 
     return False
+
+
+def grab_screenshots_batch(video_path, timestamp_and_path_list):
+    """
+    Дістає ОДРАЗУ кілька кадрів за ОДНЕ відкриття відеофайлу.
+
+    ПРОБЛЕМА, яку це вирішує: раніше для звіту з N знайдених моментів
+    grab_screenshot() викликався в циклі N разів - кожен виклик заново
+    відкривав VideoCapture і гортав файл від нульового кадру. Для
+    відео з великою кількістю знайдених моментів це N повних проходів
+    замість одного.
+
+    ТУТ: сортуємо цілі за часовою міткою і йдемо по відео СТРОГО
+    вперед одним проходом, вихоплюючи потрібні кадри по дорозі -
+    так само дешево (через grab(), без декодування "зайвих" кадрів),
+    як це вже робить extract_frames().
+
+    timestamp_and_path_list: список кортежів (timestamp_sec, save_path).
+    Повертає set успішно збережених save_path.
+    """
+    video = cv2.VideoCapture(video_path)
+    manual_rotation = _prepare_orientation(video)
+    fps = video.get(cv2.CAP_PROP_FPS) or 25.0
+
+    targets = sorted(
+        ((max(0, int(round(ts * fps))), path) for ts, path in timestamp_and_path_list),
+        key=lambda item: item[0],
+    )
+
+    saved = set()
+    frame_index = 0
+    target_pos = 0
+
+    while target_pos < len(targets):
+        target_frame_index, save_path = targets[target_pos]
+
+        while frame_index < target_frame_index:
+            if not video.grab():
+                video.release()
+                return saved
+            frame_index += 1
+
+        success, frame = video.read()
+        frame_index += 1
+        if success:
+            if manual_rotation:
+                frame = _apply_manual_rotation(frame, manual_rotation)
+            cv2.imwrite(save_path, frame)
+            saved.add(save_path)
+
+        target_pos += 1
+
+    video.release()
+    return saved
