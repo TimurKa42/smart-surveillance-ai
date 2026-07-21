@@ -1,6 +1,7 @@
 #:kivy 2.3.0
 #:import animate_press main.animate_press
 #:import animate_release main.animate_release
+#:import haptic_feedback main.haptic_feedback
 
 <RoundedLabel@Label>:
     color: app.palette["text"]
@@ -37,6 +38,7 @@
 
 <GhostButton@Button>:
     scale: 1.0
+    accent_color: app.palette["surface_alt"]
     background_normal: ""
     background_down: ""
     background_color: 0, 0, 0, 0
@@ -51,7 +53,7 @@
             x: self.scale
             y: self.scale
         Color:
-            rgba: app.palette["surface_alt"]
+            rgba: self.accent_color
         RoundedRectangle:
             pos: self.pos
             size: self.size
@@ -196,9 +198,14 @@
         size_hint_x: 1
 
     GhostButton:
-        # Убрали эмодзи, используем текст
+        # Яскравий колір, щоб кнопка "Меню" виділялась на фоні решти
+        # інтерфейсу (раніше була такого ж кольору, як усі інші
+        # неакцентні кнопки, і губилась).
         text: "Меню" if app.language == 'ua' else "Menu"
         font_size: "14sp"
+        bold: True
+        color: 1, 1, 1, 1
+        accent_color: 0.93, 0.51, 0.13, 1
         size_hint_x: None
         width: dp(70)
         on_release: app.open_settings()
@@ -463,8 +470,19 @@
                         if self.collide_point(*args[1].pos) and self.opacity == 1: root.open_lightbox(self.source)
 
 <SettingsModal>:
+    # Раніше висота шторки була фіксованою часткою екрана (0.45), і
+    # якщо контент займав менше місця - зверху над "Налаштування"
+    # лишалась порожня зона. Тепер висота підганяється під РЕАЛЬНИЙ
+    # контент (content.height рахується як minimum_height дочірніх
+    # елементів) - порожнього простору більше нема.
+    size_hint: (1, None)
+    height: content.height
+
     BoxLayout:
+        id: content
         orientation: "vertical"
+        size_hint_y: None
+        height: self.minimum_height
         padding: dp(20)
         spacing: dp(15)
         canvas.before:
@@ -479,14 +497,12 @@
             size_hint_y: None
             height: dp(40)
             RoundedLabel:
-                # Все переводы теперь жестко привязаны к app.language для мгновенного обновления
                 text: "Налаштування" if app.language == 'ua' else "Settings"
                 font_size: "18sp"
                 bold: True
                 halign: "center"
                 pos_hint: {'center_x': 0.5, 'center_y': 0.5}
-            GhostButton:
-                text: "✕"
+            CloseButton:
                 size_hint: (None, None)
                 size: (dp(40), dp(40))
                 pos_hint: {'right': 1, 'center_y': 0.5}
@@ -523,15 +539,28 @@
                 on_release: app.safe_set_language("en")
 
         BoxLayout:
+            size_hint_y: None
+            height: dp(30)
+            SubtleLabel:
+                text: "Вібрація" if app.language == 'ua' else "Vibration"
+            Switch:
+                size_hint_x: None
+                width: dp(70)
+                active: app.vibration_enabled
+                on_active: app.toggle_vibration(self.active)
+
+        BoxLayout:
             orientation: "vertical"
             size_hint_y: None
             height: dp(60)
+            disabled: not app.vibration_enabled
+            opacity: 1 if app.vibration_enabled else 0.4
             SubtleLabel:
-                text: "Відгук вібрації" if app.language == 'ua' else "Vibration feedback"
+                text: "Сила вібрації" if app.language == 'ua' else "Vibration strength"
             Slider:
-                min: 0
-                max: 0.1
-                value: app.vibration
+                min: 0.15
+                max: 1.0
+                value: app.vibration_strength
                 on_value: app.save_vibration(self.value); root.test_vibrate(self, self.value)
 
         Button:
@@ -543,4 +572,5 @@
             background_color: app.palette["danger"]
             size_hint_y: None
             height: dp(45)
+            on_press: haptic_feedback()
             on_release: root.reset_app()
