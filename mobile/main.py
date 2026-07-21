@@ -607,7 +607,6 @@ class CloseButton(Button):
 
 
 class MainScreen(Screen):
-    files_btn_text = StringProperty("")
     gallery_btn_text = StringProperty("")
 
     def on_pre_enter(self, *args):
@@ -632,12 +631,7 @@ class MainScreen(Screen):
 
     def _reset_choose_buttons_text(self):
         app = App.get_running_app()
-        self.files_btn_text = app.t("choose_from_files")
-        self.gallery_btn_text = app.t("choose_from_gallery")
-
-    def choose_video_from_files(self):
-        self._start_video_loading("files_btn_text")
-        open_native_video_picker_files(self._on_video_selected)
+        self.gallery_btn_text = app.t("choose_video")
 
     def choose_video_from_gallery(self):
         self._start_video_loading("gallery_btn_text")
@@ -650,7 +644,6 @@ class MainScreen(Screen):
         URI (це може зайняти помітний час для великих відео).
         """
         app = App.get_running_app()
-        self.ids.choose_files_btn.disabled = True
         self.ids.choose_gallery_btn.disabled = True
         setattr(self, active_btn_property, app.t("loading_video"))
 
@@ -668,7 +661,6 @@ class MainScreen(Screen):
     def _apply_video_selection(self, path):
         app = App.get_running_app()
 
-        self.ids.choose_files_btn.disabled = False
         self.ids.choose_gallery_btn.disabled = False
         self._reset_choose_buttons_text()
 
