@@ -41,8 +41,8 @@ SCREENSHOTS_SUBFOLDER = "screenshots"
 API_KEY_INSTRUCTIONS_URL = "https://aistudio.google.com/apikey"
 
 MODEL_OPTIONS = [
-    ("3.1 Flash-Lite", "gemini-3.1-flash-lite"),
-    ("3.5 Flash", "gemini-3.5-flash"),
+    ("3.5 Flash-Lite", "gemini-3.5-flash-lite"),
+    ("3.6 Flash", "gemini-3.6-flash"),
 ]
 
 
@@ -377,6 +377,35 @@ def haptic_feedback_report_ready():
     haptic_feedback(duration_ms=2000)
 
 
+class ConfirmModal(ModalView):
+    """
+    Універсальне модальне вікно підтвердження "Так / Ні". Використовує
+    той самий підхід шторки знизу (on_open animation), що й
+    SettingsModal, аби виглядати узгоджено з рештою інтерфейсу.
+
+    on_confirm викликається ЛИШЕ якщо користувач натиснув "Так" -
+    і лише ПІСЛЯ того, як саме це вікно вже закрилось (dismiss),
+    щоб не було двох модалок, які намагаються закритись одночасно.
+    """
+    message_text = StringProperty("")
+
+    def __init__(self, message_text="", on_confirm=None, **kwargs):
+        super().__init__(**kwargs)
+        self.message_text = message_text
+        self._on_confirm = on_confirm
+
+    def on_open(self):
+        target_y = self.y
+        self.y = -self.height
+        Animation(y=target_y, duration=0.22, t="out_cubic").start(self)
+
+    def confirm(self):
+        callback = self._on_confirm
+        self.dismiss()
+        if callback:
+            callback()
+
+
 class SettingsModal(ModalView):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -395,8 +424,28 @@ class SettingsModal(ModalView):
 
     def reset_app(self):
         app = App.get_running_app()
-        config.save_api_key("")
+        message = (
+            "Точно скинути API ключ? Усі звіти буде очищено, і доведеться "
+            "ввести ключ заново."
+            if app.language == 'ua' else
+            "Reset the API key? All reports will be cleared and you'll "
+            "need to enter the key again."
+        )
+        ConfirmModal(message_text=message, on_confirm=self._do_reset).open()
+
+    def _do_reset(self):
+        app = App.get_running_app()
         self.dismiss()
+
+        config.save_api_key("")
+
+        main_screen = app.root.get_screen("main")
+        main_screen.clear_all()
+
+        setup_screen = app.root.get_screen("setup")
+        setup_screen.ids.api_key_input.text = ""
+        setup_screen.error_text = ""
+
         app.root.current = "setup"
 
     def test_vibrate(self, instance, value):
@@ -715,6 +764,17 @@ class CloseButton(Button):
 class MainScreen(Screen):
     gallery_btn_text = StringProperty("")
 
+    # Лічильник "поколінь" аналізу. Кожен запуск start_analysis()
+    # збільшує його на 1 і "запам'ятовує" своє число. Фоновий потік
+    # extract_frames()/Gemini не можна перервати миттєво в середині
+    # роботи без переписування video_tools.py/gemini_tools.py під
+    # систему скасування - але коли номер покоління, з яким запускався
+    # потік, більше НЕ співпадає з поточним (бо натиснули "Очистити
+    # все" і лічильник збільшився), усі результати цього потоку просто
+    # ігноруються - ні статус, ні звіт не показуються. Для користувача
+    # це виглядає як повноцінне скасування.
+    _analysis_generation = 0
+
     def on_pre_enter(self, *args):
         self.video_path = None
         self.selected_model = None
@@ -795,6 +855,17 @@ class MainScreen(Screen):
 
     def clear_all(self):
         app = App.get_running_app()
+
+        # Якщо в цей момент іде нарізка кадрів або запит до Gemini -
+        # збільшуємо покоління. Фоновий потік і далі допрацює у себе
+        # (перервати OpenCV/мережевий запит миттєво без переписування
+        # video_tools.py/gemini_tools.py неможливо), але щойно він
+        # спробує оновити статус чи показати результат - перевірка
+        # покоління це відхилить. Тому "Очистити все" фактично працює
+        # і як "Скасувати".
+        was_running = self.ids.start_btn.disabled
+        self._analysis_generation += 1
+
         self.video_path = None
         self.selected_model = None
         self.results = []
@@ -804,7 +875,7 @@ class MainScreen(Screen):
 
         self.ids.file_label.text = app.t("no_file_selected")
         self.ids.prompt_input.text = ""
-        self.ids.status_label.text = ""
+        self.ids.status_label.text = app.t("status_cancelled") if was_running else ""
         self.ids.report_list.clear_widgets()
         self.ids.description_label.text = ""
 
@@ -836,22 +907,34 @@ class MainScreen(Screen):
         self.ids.start_btn.disabled = True
         self.ids.status_label.text = app.t("status_cutting_frames")
 
+        generation = self._analysis_generation
         thread = threading.Thread(
             target=self._run_pipeline,
-            args=(prompt_text, self.selected_model, app.loc.language),
+            args=(prompt_text, self.selected_model, app.loc.language, generation),
             daemon=True,
         )
         thread.start()
 
-    def _set_status_async(self, key, **kwargs):
-        app = App.get_running_app()
-        Clock.schedule_once(lambda dt: setattr(self.ids.status_label, "text", app.t(key, **kwargs)))
+    def _is_cancelled(self, generation):
+        return generation != self._analysis_generation
 
-    def _run_pipeline(self, prompt_text, model_name, language):
+    def _set_status_async(self, key, generation, **kwargs):
+        app = App.get_running_app()
+
+        def _apply(dt):
+            if self._is_cancelled(generation):
+                return
+            self.ids.status_label.text = app.t(key, **kwargs)
+
+        Clock.schedule_once(_apply)
+
+    def _run_pipeline(self, prompt_text, model_name, language, generation):
         app = App.get_running_app()
         try:
             frames = extract_frames(self.video_path, max_frames=MAX_FRAMES)
-            self._set_status_async("status_frames_cut", count=len(frames))
+            if self._is_cancelled(generation):
+                return
+            self._set_status_async("status_frames_cut", generation, count=len(frames))
 
             # find_object_in_frames тепер аналізує пачки кадрів
             # ПАРАЛЕЛЬНО (до 4 одночасно) замість послідовного циклу -
@@ -860,7 +943,9 @@ class MainScreen(Screen):
             matches = gemini_tools.find_object_in_frames(
                 frames, prompt_text, model_name=model_name, language=language
             )
-            self._set_status_async("status_moments_found", count=len(matches))
+            if self._is_cancelled(generation):
+                return
+            self._set_status_async("status_moments_found", generation, count=len(matches))
 
             screenshots_dir = os.path.join(app.user_data_dir, SCREENSHOTS_SUBFOLDER)
             os.makedirs(screenshots_dir, exist_ok=True)
@@ -880,24 +965,35 @@ class MainScreen(Screen):
                     "screenshot_path": screenshot_path,
                 })
 
+            if self._is_cancelled(generation):
+                return
+
             # ОДИН прохід по відеофайлу для ВСІХ знайдених моментів -
             # замість grab_screenshot() у циклі, який відкривав файл
             # заново для кожного результату.
             grab_screenshots_batch(self.video_path, targets)
 
+            if self._is_cancelled(generation):
+                return
+
             results.sort(key=lambda r: r["timestamp_sec"])
-            Clock.schedule_once(lambda dt: self._show_results(results, prompt_text))
+            Clock.schedule_once(lambda dt: self._show_results(results, prompt_text, generation))
 
         except gemini_tools.MissingApiKeyError:
-            Clock.schedule_once(lambda dt: self._on_pipeline_error(app.t("status_error", error="no API key")))
+            Clock.schedule_once(lambda dt: self._on_pipeline_error(app.t("status_error", error="no API key"), generation))
         except Exception as error:
-            Clock.schedule_once(lambda dt: self._on_pipeline_error(app.t("status_error", error=error)))
+            Clock.schedule_once(lambda dt: self._on_pipeline_error(app.t("status_error", error=error), generation))
 
-    def _on_pipeline_error(self, text):
+    def _on_pipeline_error(self, text, generation):
+        if self._is_cancelled(generation):
+            return
         self.ids.status_label.text = text
         self.ids.start_btn.disabled = False
 
-    def _show_results(self, results, prompt_text):
+    def _show_results(self, results, prompt_text, generation):
+        if self._is_cancelled(generation):
+            return
+
         app = App.get_running_app()
 
         haptic_feedback_report_ready()
