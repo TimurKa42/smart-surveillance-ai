@@ -3,6 +3,7 @@ main.py (мобільна версія на Kivy)
 """
 import os
 import threading
+import time
 import webbrowser
 import shutil
 from kivy.uix.modalview import ModalView
@@ -88,6 +89,159 @@ def request_android_permissions():
         ])
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------
+# Нативний вибір відео (замінює plyer.filechooser на Android).
+#
+# ПРИЧИНА: plyer.filechooser на Android для деяких провайдерів (напр.
+# системний застосунок "Файли"/DocumentsUI, Google Drive тощо) не вміє
+# перетворити повернутий content://-URI на звичайний файловий шлях і
+# замість шляху мовчки повертає None у списку selection. Далі код
+# викликав os.path.basename(None) -> TypeError і застосунок падав.
+# Галерея зазвичай віддає шлях, який plyer розуміє, тому звідти вибір
+# працював, а з "Файлів" - падав.
+#
+# Рішення: керуємо Android Intent'ом самі (ACTION_OPEN_DOCUMENT) і самі
+# копіюємо вміст обраного URI через ContentResolver у файл усередині
+# застосунку - це працює однаково надійно для БУДЬ-якого провайдера.
+# ---------------------------------------------------------------------
+_video_pick_callback = None
+REQUEST_CODE_PICK_VIDEO = 0x4A11
+
+
+def register_video_picker_listener():
+    """Реєструє обробник результату Intent'а. Викликати один раз при старті застосунку."""
+    if platform != "android":
+        return
+    try:
+        from android import activity
+        activity.bind(on_activity_result=_on_activity_result)
+    except Exception:
+        pass
+
+
+def _on_activity_result(request_code, result_code, intent):
+    global _video_pick_callback
+    if request_code != REQUEST_CODE_PICK_VIDEO:
+        return
+
+    callback = _video_pick_callback
+    _video_pick_callback = None
+    if callback is None:
+        return
+
+    RESULT_OK = -1
+    if result_code != RESULT_OK or intent is None:
+        Clock.schedule_once(lambda dt: callback(None))
+        return
+
+    try:
+        uri = intent.getData()
+    except Exception:
+        uri = None
+
+    if uri is None:
+        Clock.schedule_once(lambda dt: callback(None))
+        return
+
+    # Копіювання може бути повільним для великих відео - робимо у
+    # фоновому потоці, щоб не заморожувати інтерфейс.
+    threading.Thread(target=_copy_uri_to_local_file, args=(uri, callback), daemon=True).start()
+
+
+def _query_display_name(resolver, uri):
+    try:
+        from jnius import autoclass
+        OpenableColumns = autoclass("android.provider.OpenableColumns")
+        cursor = resolver.query(uri, None, None, None, None)
+        if cursor is None:
+            return None
+        try:
+            if cursor.moveToFirst():
+                index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if index >= 0:
+                    name = cursor.getString(index)
+                    if name:
+                        return name
+        finally:
+            cursor.close()
+    except Exception:
+        pass
+    return None
+
+
+def _copy_uri_to_local_file(uri, callback):
+    try:
+        from jnius import autoclass
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        activity_obj = PythonActivity.mActivity
+        resolver = activity_obj.getContentResolver()
+
+        input_stream = resolver.openInputStream(uri)
+        if input_stream is None:
+            Clock.schedule_once(lambda dt: callback(None))
+            return
+
+        app = App.get_running_app()
+        cache_dir = os.path.join(app.user_data_dir, "picked_videos")
+        os.makedirs(cache_dir, exist_ok=True)
+
+        display_name = _query_display_name(resolver, uri) or f"video_{int(time.time())}.mp4"
+        dest_path = os.path.join(cache_dir, display_name)
+
+        with open(dest_path, "wb") as out_file:
+            java_buffer = bytearray(65536)
+            while True:
+                read_count = input_stream.read(java_buffer)
+                if read_count == -1:
+                    break
+                out_file.write(bytes(java_buffer[:read_count]))
+        input_stream.close()
+
+        Clock.schedule_once(lambda dt: callback(dest_path))
+    except Exception as e:
+        print("Помилка копіювання обраного файлу:", e)
+        Clock.schedule_once(lambda dt: callback(None))
+
+
+def open_native_video_picker(callback):
+    """
+    Викликає callback(path_or_none) з ГОЛОВНОГО потоку (через Clock)
+    незалежно від платформи - MainScreen._on_video_selected() завжди
+    може розраховувати на це.
+    """
+    global _video_pick_callback
+
+    if platform != "android":
+        # На комп'ютері (для тестування "python main.py" на Linux/macOS)
+        # лишаємо plyer - там усе це не актуально.
+        try:
+            from plyer import filechooser
+            filechooser.open_file(
+                on_selection=lambda sel: callback(sel[0] if sel else None),
+                filters=[["Video", "*.mp4", "*.avi", "*.mov", "*.mkv"]],
+            )
+        except Exception:
+            callback(None)
+        return
+
+    _video_pick_callback = callback
+    try:
+        from jnius import autoclass, cast
+        Intent = autoclass("android.content.Intent")
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+
+        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+        intent.setType("video/*")
+
+        current_activity = cast("android.app.Activity", PythonActivity.mActivity)
+        current_activity.startActivityForResult(intent, REQUEST_CODE_PICK_VIDEO)
+    except Exception as e:
+        print("Не вдалось відкрити пікер файлів:", e)
+        _video_pick_callback = None
+        callback(None)
 
 
 def get_safe_insets():
@@ -379,32 +533,24 @@ class MainScreen(Screen):
         self.ids.word_count_label.text = app.t("word_count", count=count, max=MAX_WORDS_IN_PROMPT)
 
     def choose_video(self):
-        try:
-            from plyer import filechooser
-        except Exception:
-            self.ids.status_label.text = "plyer недоступний на цій платформі"
-            return
+        open_native_video_picker(self._on_video_selected)
 
-        filechooser.open_file(
-            on_selection=self._on_video_selected,
-            filters=[["Video", "*.mp4", "*.avi", "*.mov", "*.mkv"]],
-        )
-
-    def _on_video_selected(self, selection):
+    def _on_video_selected(self, path):
         """
-        На Android колбек від plyer іноді відпрацьовує НЕ в головному
-        (GL) потоці Kivy. Пряме встановлення властивостей віджетів з
-        чужого потоку могло тихо "губитись" - схоже, саме це спричиняло
-        баг "після Очистити все відео більше не обирається". Тому
-        загортаємо в Clock.schedule_once, який гарантовано виконує код
-        у головному потоці.
+        Викликається як з нативного пікера (Android), так і з plyer
+        (десктоп-тест) - в обох випадках гарантовано з головного потоку.
+        path може бути None (користувач скасував вибір, або якийсь
+        провайдер файлів не віддав дані) - раніше саме на цьому падало
+        з TypeError у os.path.basename(None). Тепер - просто повідомлення,
+        без краху.
         """
-        if not selection:
-            return
-        path = selection[0]
         Clock.schedule_once(lambda dt: self._apply_video_selection(path))
 
     def _apply_video_selection(self, path):
+        app = App.get_running_app()
+        if not path or not os.path.exists(path):
+            self.ids.status_label.text = app.t("status_video_open_failed")
+            return
         self.video_path = path
         self.ids.file_label.text = os.path.basename(path)
 
@@ -596,6 +742,7 @@ class SmartSurveillanceApp(App):
 
     def build(self):
         request_android_permissions()
+        register_video_picker_listener()
 
         settings = settings_store.load_settings()
         self.loc = Localization(settings["language"])
