@@ -30,7 +30,7 @@ import config
 import settings_store
 import theme
 from localization import Localization
-from video_tools import extract_frames, grab_screenshot, format_time
+from video_tools import extract_frames, grab_screenshots_batch, format_time
 import gemini_tools
 
 MAX_WORDS_IN_PROMPT = 200
@@ -102,12 +102,23 @@ def request_android_permissions():
 # Галерея зазвичай віддає шлях, який plyer розуміє, тому звідти вибір
 # працював, а з "Файлів" - падав.
 #
-# Рішення: керуємо Android Intent'ом самі (ACTION_OPEN_DOCUMENT) і самі
-# копіюємо вміст обраного URI через ContentResolver у файл усередині
-# застосунку - це працює однаково надійно для БУДЬ-якого провайдера.
+# Рішення: керуємо Android Intent'ом самі і самі копіюємо вміст
+# обраного URI через ContentResolver у файл усередині застосунку -
+# це працює однаково надійно для БУДЬ-якого провайдера.
+#
+# ДВІ ТОЧКИ ВХОДУ:
+# - open_native_video_picker_files()   -> ACTION_OPEN_DOCUMENT,
+#   загальний системний пікер (Файли, Google Drive, і т.д.)
+# - open_native_video_picker_gallery() -> ACTION_PICK на
+#   MediaStore.Video.Media, відкриває одразу застосунок галереї,
+#   без проміжного вибору провайдера.
+#
+# Обидва повертаються через ОДИН обробник _on_activity_result -
+# розрізняємо їх за request code.
 # ---------------------------------------------------------------------
 _video_pick_callback = None
-REQUEST_CODE_PICK_VIDEO = 0x4A11
+REQUEST_CODE_PICK_VIDEO_FILES = 0x4A11
+REQUEST_CODE_PICK_VIDEO_GALLERY = 0x4A12
 
 
 def register_video_picker_listener():
@@ -123,7 +134,7 @@ def register_video_picker_listener():
 
 def _on_activity_result(request_code, result_code, intent):
     global _video_pick_callback
-    if request_code != REQUEST_CODE_PICK_VIDEO:
+    if request_code not in (REQUEST_CODE_PICK_VIDEO_FILES, REQUEST_CODE_PICK_VIDEO_GALLERY):
         return
 
     callback = _video_pick_callback
@@ -205,17 +216,35 @@ def _copy_uri_to_local_file(uri, callback):
         Clock.schedule_once(lambda dt: callback(None))
 
 
-def open_native_video_picker(callback):
-    """
-    Викликає callback(path_or_none) з ГОЛОВНОГО потоку (через Clock)
-    незалежно від платформи - MainScreen._on_video_selected() завжди
-    може розраховувати на це.
-    """
+def _open_android_intent(action, request_code, mime_type, callback, data_uri_builder=None):
     global _video_pick_callback
+    _video_pick_callback = callback
+    try:
+        from jnius import autoclass, cast
+        Intent = autoclass("android.content.Intent")
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
 
+        intent = Intent(action)
+        if data_uri_builder is not None:
+            intent.setData(data_uri_builder())
+        else:
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+        intent.setType(mime_type)
+
+        current_activity = cast("android.app.Activity", PythonActivity.mActivity)
+        current_activity.startActivityForResult(intent, request_code)
+    except Exception as e:
+        print("Не вдалось відкрити пікер файлів:", e)
+        _video_pick_callback = None
+        callback(None)
+
+
+def open_native_video_picker_files(callback):
+    """
+    Загальний системний пікер (ACTION_OPEN_DOCUMENT) - Файли, Google
+    Drive, інші зареєстровані провайдери. На комп'ютері - plyer.
+    """
     if platform != "android":
-        # На комп'ютері (для тестування "python main.py" на Linux/macOS)
-        # лишаємо plyer - там усе це не актуально.
         try:
             from plyer import filechooser
             filechooser.open_file(
@@ -226,22 +255,32 @@ def open_native_video_picker(callback):
             callback(None)
         return
 
-    _video_pick_callback = callback
-    try:
-        from jnius import autoclass, cast
-        Intent = autoclass("android.content.Intent")
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+    from jnius import autoclass
+    Intent = autoclass("android.content.Intent")
+    _open_android_intent(Intent.ACTION_OPEN_DOCUMENT, REQUEST_CODE_PICK_VIDEO_FILES, "video/*", callback)
 
-        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
-        intent.addCategory(Intent.CATEGORY_OPENABLE)
-        intent.setType("video/*")
 
-        current_activity = cast("android.app.Activity", PythonActivity.mActivity)
-        current_activity.startActivityForResult(intent, REQUEST_CODE_PICK_VIDEO)
-    except Exception as e:
-        print("Не вдалось відкрити пікер файлів:", e)
-        _video_pick_callback = None
-        callback(None)
+def open_native_video_picker_gallery(callback):
+    """
+    ACTION_PICK напряму на MediaStore.Video.Media - відкриває одразу
+    застосунок галереї, без проміжного вибору провайдера (на відміну
+    від ACTION_OPEN_DOCUMENT, який показує загальний системний пікер
+    з кількома вкладками).
+    """
+    if platform != "android":
+        # На комп'ютері окремої "галереї" нема - лишаємо той самий
+        # plyer file dialog, що й для "З файлів".
+        open_native_video_picker_files(callback)
+        return
+
+    from jnius import autoclass
+    Intent = autoclass("android.content.Intent")
+    MediaStore = autoclass("android.provider.MediaStore$Video$Media")
+
+    def build_uri():
+        return MediaStore.EXTERNAL_CONTENT_URI
+
+    _open_android_intent(Intent.ACTION_PICK, REQUEST_CODE_PICK_VIDEO_GALLERY, "video/*", callback, build_uri)
 
 
 def get_safe_insets():
@@ -515,6 +554,7 @@ class ModelButton(Button):
     model_name = StringProperty("")
     scale = NumericProperty(1.0)
 
+
 class ReportItemButton(ButtonBehavior, BoxLayout):
     """
     У списку тепер тільки ЧАС - компактний чіп фіксованої висоти.
@@ -529,9 +569,11 @@ class ReportItemButton(ButtonBehavior, BoxLayout):
     scale = NumericProperty(1.0)
     time_text = StringProperty("")
 
+
 class ThemeChipButton(Button):
     is_selected = BooleanProperty(False)
     scale = NumericProperty(1.0)
+
 
 class GhostButton(Button):
     scale = NumericProperty(1.0)
@@ -547,8 +589,10 @@ class GhostButton(Button):
     # властивість існує і має коректне значення ДО будь-яких kv-правил.
     accent_color = ListProperty([0, 0, 0, 0])
 
+
 class AccentButton(Button):
     scale = NumericProperty(1.0)
+
 
 class CloseButton(Button):
     """
@@ -563,6 +607,9 @@ class CloseButton(Button):
 
 
 class MainScreen(Screen):
+    files_btn_text = StringProperty("")
+    gallery_btn_text = StringProperty("")
+
     def on_pre_enter(self, *args):
         self.video_path = None
         self.selected_model = None
@@ -577,12 +624,35 @@ class MainScreen(Screen):
         if not getattr(self, "video_path", None):
             self.ids.file_label.text = app.t("no_file_selected")
 
+        self._reset_choose_buttons_text()
+
         text = self.ids.prompt_input.text
         count = len(text.split()) if text.strip() else 0
         self.ids.word_count_label.text = app.t("word_count", count=count, max=MAX_WORDS_IN_PROMPT)
 
-    def choose_video(self):
-        open_native_video_picker(self._on_video_selected)
+    def _reset_choose_buttons_text(self):
+        app = App.get_running_app()
+        self.files_btn_text = app.t("choose_from_files")
+        self.gallery_btn_text = app.t("choose_from_gallery")
+
+    def choose_video_from_files(self):
+        self._start_video_loading("files_btn_text")
+        open_native_video_picker_files(self._on_video_selected)
+
+    def choose_video_from_gallery(self):
+        self._start_video_loading("gallery_btn_text")
+        open_native_video_picker_gallery(self._on_video_selected)
+
+    def _start_video_loading(self, active_btn_property):
+        """
+        Блокує обидві кнопки вибору відео і показує "Завантаження..."
+        на тій, яку натиснули - поки йде копіювання файлу з обраного
+        URI (це може зайняти помітний час для великих відео).
+        """
+        app = App.get_running_app()
+        self.ids.choose_files_btn.disabled = True
+        self.ids.choose_gallery_btn.disabled = True
+        setattr(self, active_btn_property, app.t("loading_video"))
 
     def _on_video_selected(self, path):
         """
@@ -597,6 +667,11 @@ class MainScreen(Screen):
 
     def _apply_video_selection(self, path):
         app = App.get_running_app()
+
+        self.ids.choose_files_btn.disabled = False
+        self.ids.choose_gallery_btn.disabled = False
+        self._reset_choose_buttons_text()
+
         if not path or not os.path.exists(path):
             self.ids.status_label.text = app.t("status_video_open_failed")
             return
@@ -626,6 +701,8 @@ class MainScreen(Screen):
         self.selected_model = None
         self.results = []
         self.current_screenshot_index = None
+
+        self._reset_choose_buttons_text()
 
         self.ids.file_label.text = app.t("no_file_selected")
         self.ids.prompt_input.text = ""
@@ -678,6 +755,10 @@ class MainScreen(Screen):
             frames = extract_frames(self.video_path, max_frames=MAX_FRAMES)
             self._set_status_async("status_frames_cut", count=len(frames))
 
+            # find_object_in_frames тепер аналізує пачки кадрів
+            # ПАРАЛЕЛЬНО (до 4 одночасно) замість послідовного циклу -
+            # це основне прискорення для відео з великою кількістю
+            # кадрів (кілька пачок по BATCH_SIZE=40).
             matches = gemini_tools.find_object_in_frames(
                 frames, prompt_text, model_name=model_name, language=language
             )
@@ -687,18 +768,24 @@ class MainScreen(Screen):
             os.makedirs(screenshots_dir, exist_ok=True)
 
             results = []
+            targets = []
             for match in matches:
                 if not (0 <= match.frame_number < len(frames)):
                     continue
                 timestamp_sec = frames[match.frame_number]["timestamp_sec"]
                 screenshot_path = os.path.join(screenshots_dir, f"frame_{match.frame_number}.jpg")
-                grab_screenshot(self.video_path, timestamp_sec, screenshot_path)
+                targets.append((timestamp_sec, screenshot_path))
                 results.append({
                     "time_str": format_time(timestamp_sec),
                     "timestamp_sec": timestamp_sec,
                     "description": match.description,
                     "screenshot_path": screenshot_path,
                 })
+
+            # ОДИН прохід по відеофайлу для ВСІХ знайдених моментів -
+            # замість grab_screenshot() у циклі, який відкривав файл
+            # заново для кожного результату.
+            grab_screenshots_batch(self.video_path, targets)
 
             results.sort(key=lambda r: r["timestamp_sec"])
             Clock.schedule_once(lambda dt: self._show_results(results, prompt_text))
