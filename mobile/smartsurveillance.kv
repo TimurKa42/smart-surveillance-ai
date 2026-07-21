@@ -91,7 +91,7 @@
     # переносу по літерах. Повний опис від ШІ - у панелі справа
     # (description_label), не тут.
     orientation: "horizontal"
-    padding: [dp(10), dp(0)]
+    padding: [dp(4), dp(0)]
     on_press: animate_press(self)
     on_release: animate_release(self)
     canvas.before:
@@ -286,7 +286,6 @@
             size_hint_y: 1
 
 <MainScreen>:
-    choose_files_btn: choose_files_btn
     choose_gallery_btn: choose_gallery_btn
     file_label: file_label
     prompt_input: prompt_input
@@ -319,19 +318,11 @@
             spacing: dp(6)
 
             AccentButton:
-                id: choose_files_btn
-                text: root.files_btn_text
-                halign: "center"
-                font_size: "13sp"
-                size_hint_x: 0.28
-                on_release: root.choose_video_from_files()
-
-            AccentButton:
                 id: choose_gallery_btn
                 text: root.gallery_btn_text
                 halign: "center"
                 font_size: "13sp"
-                size_hint_x: 0.28
+                size_hint_x: 0.32
                 on_release: root.choose_video_from_gallery()
 
             RoundedLabel:
@@ -427,7 +418,7 @@
             orientation: "horizontal"
 
             ScrollView:
-                size_hint_x: 0.3 if not app.is_landscape else 0.22
+                size_hint_x: 0.38 if not app.is_landscape else 0.28
                 do_scroll_x: False
                 BoxLayout:
                     id: report_list
