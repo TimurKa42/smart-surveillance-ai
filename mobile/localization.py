@@ -21,9 +21,8 @@ DEFAULT_LANGUAGE = LANG_UA
 
 TEXTS = {
     LANG_UA: {
-        "window_title": "Smart Surveillance AI",
-
-        "choose_video": "Обрати відео",
+        "choose_video": "Обрати\nвідео",
+        "loading_video": "Завантаження відео...",
         "no_file_selected": "Файл не обрано",
         "clear_all": "Очистити все",
 
@@ -34,12 +33,8 @@ TEXTS = {
 
         "choose_model_label": "Оберіть модель:",
 
-        "report_label": "Звіт",
-        "photo_placeholder": "Тут з'явиться скріншот",
-        "nothing_found_photo": "Нічого не знайдено 🙁",
-
         "status_choose_video_first": "Спочатку обери відео",
-        "status_choose_model": "Обери модель (3.1 Flash-Lite або 3.5 Flash)",
+        "status_choose_model": "Обери модель (3.5 Flash-Lite або 3.6 Flash)",
         "status_write_query": "Напиши, кого або що шукати",
         "status_cutting_frames": "Нарізаю відео на кадри...",
         "status_frames_cut": "Кадрів нарізано: {count}. Питаю Gemini...",
@@ -51,31 +46,12 @@ TEXTS = {
         "nothing_found_list": "Нічого не знайдено",
         "nothing_found_description": "За запитом «{query}» на відео нічого не знайдено.",
 
-        "lightbox_close": "✕ Закрити",
-
-        "file_dialog_title": "Обери відео",
-        "file_dialog_video_files": "Відеофайли",
-        "file_dialog_all_files": "Усі файли",
-
-        "theme_label": "Тема:",
-        "theme_auto": "Авто",
-        "theme_light": "Світла",
-        "theme_dark": "Темна",
-
-        "language_label": "Мова:",
-
         # ---- екран вводу API-ключа ----
         "api_key_screen_title": "Вітаємо у Smart Surveillance AI",
         "api_key_screen_subtitle": "Щоб почати, встав свій API-ключ Gemini",
         "api_key_placeholder": "Встав свій ключ сюди...",
         "api_key_no_key_hint": "Немає ключа? Дізнатись, як отримати",
         "api_key_submit": "Зберегти і продовжити",
-        "api_key_empty_error": "Спочатку встав ключ",
-        "api_key_invalid": "Ключ недійсний або немає доступу до Gemini API",
-
-        # ---- шторка налаштувань ----
-        "settings_title": "Налаштування",
-        "reset_button": "Скинути API Ключ",
 
         # ---- перегляд фото (lightbox) ----
         "lightbox_save": "Зберегти",
@@ -84,11 +60,18 @@ TEXTS = {
 
         # ---- вибір відео ----
         "status_video_open_failed": "Не вдалося відкрити обраний файл. Спробуй ще раз",
+
+        # ---- історія кадрів (HistoryModal) ----
+        "history_view_frames": "Переглянути кадри",
+        "history_delete_all": "Видалити все",
+        "history_delete_confirm": "Видалити {count} кадрів?",
+        "history_empty": "Кадрів не знайдено",
+        "history_deleted": "Кадри видалено",
+        "history_delete_failed": "Не вдалось видалити",
     },
     LANG_EN: {
-        "window_title": "Smart Surveillance AI",
-
-        "choose_video": "Choose video",
+        "choose_video": "Choose\nvideo",
+        "loading_video": "Loading video...",
         "no_file_selected": "No file selected",
         "clear_all": "Clear all",
 
@@ -99,12 +82,8 @@ TEXTS = {
 
         "choose_model_label": "Choose a model:",
 
-        "report_label": "Report",
-        "photo_placeholder": "The screenshot will appear here",
-        "nothing_found_photo": "Nothing found 🙁",
-
         "status_choose_video_first": "Please choose a video first",
-        "status_choose_model": "Choose a model (3.1 Flash-Lite or 3.5 Flash)",
+        "status_choose_model": "Choose a model (3.5 Flash-Lite or 3.6 Flash)",
         "status_write_query": "Write who or what to look for",
         "status_cutting_frames": "Cutting the video into frames...",
         "status_frames_cut": "Frames cut: {count}. Asking Gemini...",
@@ -116,31 +95,12 @@ TEXTS = {
         "nothing_found_list": "Nothing found",
         "nothing_found_description": "Nothing was found in the video for the query \u201c{query}\u201d.",
 
-        "lightbox_close": "✕ Close",
-
-        "file_dialog_title": "Choose a video",
-        "file_dialog_video_files": "Video files",
-        "file_dialog_all_files": "All files",
-
-        "theme_label": "Theme:",
-        "theme_auto": "Auto",
-        "theme_light": "Light",
-        "theme_dark": "Dark",
-
-        "language_label": "Language:",
-
         # ---- API key setup screen ----
         "api_key_screen_title": "Welcome to Smart Surveillance AI",
         "api_key_screen_subtitle": "To get started, paste your Gemini API key",
         "api_key_placeholder": "Paste your key here...",
         "api_key_no_key_hint": "No key? Learn how to get one",
         "api_key_submit": "Save and continue",
-        "api_key_empty_error": "Please paste your key first",
-        "api_key_invalid": "Invalid key or no access to Gemini API",
-
-        # ---- settings sheet ----
-        "settings_title": "Settings",
-        "reset_button": "Reset API Key",
 
         # ---- photo viewer (lightbox) ----
         "lightbox_save": "Save",
@@ -149,6 +109,14 @@ TEXTS = {
 
         # ---- video picking ----
         "status_video_open_failed": "Couldn't open the selected file. Please try again",
+
+        # ---- frame history (HistoryModal) ----
+        "history_view_frames": "View frames",
+        "history_delete_all": "Delete all",
+        "history_delete_confirm": "Delete {count} frames?",
+        "history_empty": "No frames found",
+        "history_deleted": "Frames deleted",
+        "history_delete_failed": "Failed to delete",
     },
 }
 
