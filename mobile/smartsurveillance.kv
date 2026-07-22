@@ -481,6 +481,153 @@
                     on_touch_down:
                         if self.collide_point(*args[1].pos) and self.opacity == 1: root.open_lightbox(self.source)
 
+<SelectCheckboxIndicator@Widget>:
+    # Просто ВІЗУАЛЬНИЙ індикатор вибору (не окрема кнопка) - весь
+    # рядок HistoryRow і так тапабельний цілком (ButtonBehavior), тому
+    # чекбоксу не потрібна власна логіка на дотик, лише малювання.
+    is_selected: False
+    size_hint: (None, None)
+    size: (dp(26), dp(26))
+    canvas.before:
+        Color:
+            rgba: app.palette["accent"] if self.is_selected else (0, 0, 0, 0)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(7)]
+        Color:
+            rgba: app.palette["accent"] if self.is_selected else app.palette["text_muted"]
+        Line:
+            rounded_rectangle: [self.x, self.y, self.width, self.height, dp(7)]
+            width: dp(1.6)
+    canvas.after:
+        Color:
+            rgba: 1, 1, 1, 1
+        Line:
+            points: [self.x + dp(6), self.y + dp(12), self.x + dp(11), self.y + dp(7), self.x + dp(20), self.y + dp(19)] if self.is_selected else []
+            width: dp(2)
+            cap: "round"
+            joint: "round"
+
+<HistoryRow>:
+    size_hint_y: None
+    height: dp(64)
+    padding: [dp(14), dp(8)]
+    spacing: dp(10)
+    on_press: animate_press(self)
+    on_release: animate_release(self)
+    canvas.before:
+        PushMatrix
+        Scale:
+            origin: self.center
+            x: self.scale
+            y: self.scale
+        Color:
+            rgba: app.palette["surface_alt"] if self.is_selected else app.palette["card"]
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(14)]
+    canvas.after:
+        PopMatrix
+
+    BoxLayout:
+        orientation: "vertical"
+        RoundedLabel:
+            text: root.date_text
+            bold: True
+            font_size: "15sp"
+            halign: "left"
+            valign: "middle"
+            text_size: self.width, None
+        SubtleLabel:
+            text: root.time_text
+            halign: "left"
+            valign: "middle"
+            text_size: self.width, None
+
+    SelectCheckboxIndicator:
+        is_selected: root.is_selected
+        opacity: 1 if root.selection_mode else 0
+        size_hint_x: None
+        width: dp(30) if root.selection_mode else 0
+
+<HistoryModal>:
+    size_hint: (0.86, 0.8)
+    background_color: 0, 0, 0, 0.6
+    pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+
+    BoxLayout:
+        orientation: "vertical"
+        canvas.before:
+            Color:
+                rgba: app.palette["surface"]
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(20)]
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(48)
+            padding: [dp(12), dp(6)]
+            spacing: dp(8)
+
+            Button:
+                text: "Видалити" if app.language == 'ua' else "Delete"
+                background_normal: ""
+                background_down: ""
+                background_color: app.palette["danger"] if (root.selection_mode and root.selected_count) else app.palette["surface_alt"]
+                color: (1, 1, 1, 1) if (root.selection_mode and root.selected_count) else app.palette["text_muted"]
+                bold: root.selection_mode
+                font_size: "14sp"
+                size_hint_x: None
+                width: dp(96)
+                on_press: haptic_feedback()
+                on_release: root.request_delete()
+
+            SelectCheckboxIndicator:
+                is_selected: root.records_count > 0 and root.selected_count == root.records_count
+                opacity: 1 if root.has_records else 0.3
+                disabled: not root.has_records
+
+            Button:
+                text: "все" if app.language == 'ua' else "all"
+                background_normal: ""
+                background_down: ""
+                background_color: 0, 0, 0, 0
+                color: app.palette["text_muted"]
+                font_size: "13sp"
+                size_hint_x: None
+                width: dp(40)
+                disabled: not root.has_records
+                on_release: root.toggle_select_all()
+
+            Widget:
+
+            CloseButton:
+                size_hint: (None, None)
+                size: (dp(40), dp(40))
+                on_release: root.dismiss()
+
+        FloatLayout:
+            ScrollView:
+                do_scroll_x: False
+                BoxLayout:
+                    id: history_list
+                    orientation: "vertical"
+                    size_hint_y: None
+                    height: self.minimum_height
+                    padding: [dp(12), dp(4)]
+                    spacing: dp(8)
+
+            RoundedLabel:
+                text: ("Кадрів ще не знайдено" if app.language == 'ua' else "No screenshots yet")
+                opacity: 0 if root.has_records else 1
+                pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+                halign: "center"
+                valign: "middle"
+
 <ConfirmModal>:
     size_hint: (0.85, None)
     height: content.height
@@ -625,6 +772,12 @@
                 max: 1.0
                 value: app.vibration_strength
                 on_value: app.save_vibration(self.value); root.test_vibrate(self, self.value)
+
+        AccentButton:
+            text: "Переглянути кадри" if app.language == 'ua' else "View screenshots"
+            size_hint_y: None
+            height: dp(45)
+            on_release: root.open_history()
 
         Button:
             text: "Скинути API Ключ" if app.language == 'ua' else "Reset API Key"
