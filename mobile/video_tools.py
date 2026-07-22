@@ -1,3 +1,5 @@
+import struct
+
 import cv2
 
 # Числові ID властивостей OpenCV, які з'явились у 4.5 (CAP_PROP_ORIENTATION_META
@@ -7,42 +9,266 @@ import cv2
 _CAP_PROP_ORIENTATION_META = getattr(cv2, "CAP_PROP_ORIENTATION_META", 48)
 
 
-def _prepare_orientation(video):
+# ---------------------------------------------------------------------------
+# Читання кута повороту напряму з MP4-файлу (без OpenCV)
+# ---------------------------------------------------------------------------
+#
+# ЧОМУ ЦЕ ТУТ Є:
+# OpenCV на Android (CAP_PROP_ORIENTATION_META) не вміє читати кут
+# повороту з телефонних відео - завжди повертає 0, навіть якщо відео
+# насправді треба повернути на 90/180/270 градусів. На Mac (desktop
+# збірка OpenCV) те саме працює нормально - ось звідки різниця в
+# поведінці застосунку на різних платформах.
+#
+# Рішення: дістаємо кут самі, читаючи "сирий" MP4-файл як послідовність
+# байтів - без OpenCV і без будь-яких зовнішніх бібліотек. Це працює
+# однаково на будь-якій платформі.
+#
+# ЩО ТАКЕ MP4-ФАЙЛ ЗСЕРЕДИНИ (коротко):
+# MP4-файл складається з "боксів" (box) - шматків даних, кожен з яких
+# має заголовок:
+#   [4 байти: розмір цього боксу] [4 байти: назва боксу, напр. b"moov"] [дані...]
+# Бокси можуть лежати один в одному, як матрьошка. Нам потрібен шлях:
+#   moov -> trak -> tkhd
+# "moov" - загальний контейнер з інформацією про відео.
+# "trak" - один трек (доріжка). Треків може бути кілька: відео, аудіо.
+# "tkhd" - заголовок треку. Саме тут лежить кут повороту та розміри
+#          кадру (width/height), якщо це відео-трек.
+
+
+def _read_box_header(file, offset):
+    """
+    Читає заголовок ОДНОГО боксу за вказаним зсувом (offset) у файлі.
+
+    Повертає (назва_боксу, розмір_боксу, зсув_де_починаються_дані_боксу)
+    або None, якщо дочитали до кінця файлу / заголовок биний.
+    """
+    file.seek(offset)
+    header = file.read(8)
+    if len(header) < 8:
+        return None  # файл закінчився - боксів більше нема
+
+    size = int.from_bytes(header[0:4], byteorder="big")
+    box_type = header[4:8]
+    data_start = offset + 8
+
+    if size == 1:
+        # Спеціальний випадок: розмір боксу не влазить у 4 байти,
+        # тому реальний розмір (64-бітний) лежить одразу ПІСЛЯ заголовка.
+        big_size_bytes = file.read(8)
+        if len(big_size_bytes) < 8:
+            return None
+        size = int.from_bytes(big_size_bytes, byteorder="big")
+        data_start = offset + 16
+    elif size == 0:
+        # size == 0 означає "цей бокс триває до самого кінця файлу"
+        # (так буває, наприклад, з mdat, якщо файл писали "на льоту").
+        file.seek(0, 2)  # перестрибуємо в кінець файлу
+        size = file.tell() - offset
+
+    return box_type, size, data_start
+
+
+def _find_box(file, box_type, start, end):
+    """
+    Шукає бокс з назвою box_type серед "сусідів" у діапазоні [start, end)
+    ОДНОГО рівня вкладеності (не заглиблюючись у самі бокси).
+
+    Наприклад: _find_box(f, b"moov", 0, розмір_файлу) знайде "moov",
+    навіть якщо перед ним стоять інші top-level бокси (ftyp, free, mdat) -
+    і навіть якщо moov лежить В КІНЦІ файлу (так буває у перекодованих
+    відео).
+
+    Повертає (зсув_даних_боксу, розмір_даних_боксу) або None, якщо
+    не знайшли.
+    """
+    offset = start
+    while offset < end:
+        header = _read_box_header(file, offset)
+        if header is None:
+            return None
+
+        box_type_found, box_size, data_start = header
+        if box_size <= 0:
+            return None  # биний бокс - розмір не може бути від'ємним/нульовим
+
+        data_size = box_size - (data_start - offset)
+
+        if box_type_found == box_type:
+            return data_start, data_size
+
+        offset += box_size  # перестрибуємо одразу до НАСТУПНОГО боксу
+
+    return None
+
+
+# Кут повороту "закодований" у матриці tkhd чотирма числами (a, b, c, d).
+# Це стандартні значення, які реально пишуть телефони/редактори відео.
+# Формат чисел - fixed-point 16.16 (число ціле, помножене на 65536).
+_ONE = 0x10000  # 1.0 у форматі fixed-point 16.16
+
+_ROTATION_MATRIX_TO_ANGLE = {
+    (_ONE, 0, 0, _ONE): 0,
+    (0, _ONE, -_ONE, 0): 90,
+    (-_ONE, 0, 0, -_ONE): 180,
+    (0, -_ONE, _ONE, 0): 270,
+}
+
+
+def _matrix_to_angle(a, b, c, d):
+    """
+    Перетворює 4 числа матриці на кут повороту (0/90/180/270).
+
+    Якщо матриця не збігається ЖОДНИМ з очікуваних 4 варіантів (це
+    може бути дзеркальне відображення або щось екзотичне) - чесно
+    повертаємо 0 замість того, щоб намагатись вгадати.
+    """
+    return _ROTATION_MATRIX_TO_ANGLE.get((a, b, c, d), 0)
+
+
+def _read_tkhd_fields(file, data_start, data_size):
+    """
+    Читає з одного tkhd-боксу дві речі:
+      1) width, height - потрібні лише щоб зрозуміти, чи це відео-трек
+         (у аудіо-треку тут завжди 0x0)
+      2) матрицю (a, b, c, d) - з неї рахуємо кут повороту
+
+    Повертає (width, height, a, b, c, d) або None, якщо бокс закороткий/биний.
+    """
+    file.seek(data_start)
+    payload = file.read(data_size)
+    if len(payload) < 1:
+        return None
+
+    version = payload[0]
+
+    # Розмір "часових" полів (creation/modification/duration) залежить
+    # від версії боксу: version=0 -> 4-байтні поля, version=1 -> 8-байтні.
+    # Якщо це не врахувати, всі наступні зсуви (в т.ч. матриця і
+    # width/height) "поплетуть" і ми прочитаємо сміття замість чисел.
+    if version == 1:
+        time_fields_size = 8 + 8 + 4 + 4 + 8  # creation+modification+track_id+reserved+duration
+    else:
+        time_fields_size = 4 + 4 + 4 + 4 + 4
+
+    # Після часових полів завжди йде однаковий для обох версій блок:
+    # reserved(8) + layer(2) + alternate_group(2) + volume(2) + reserved(2) = 16 байт
+    fixed_block_size = 8 + 2 + 2 + 2 + 2
+
+    matrix_offset = 4 + time_fields_size + fixed_block_size  # 4 = version+flags
+    matrix_size = 36  # 9 чисел по 4 байти
+
+    matrix_end = matrix_offset + matrix_size
+    width_height_end = matrix_end + 8  # width(4) + height(4)
+
+    if len(payload) < width_height_end:
+        return None  # бокс коротший, ніж очікувалось - щось не так, здаємось
+
+    def read_fixed_point(raw_bytes):
+        # Fixed-point 16.16 і ЗІ ЗНАКОМ (потрібно для -1.0 у матриці
+        # при поворотах на 180). "big" - порядок байтів, як завжди в MP4.
+        return int.from_bytes(raw_bytes, byteorder="big", signed=True)
+
+    # З 9 чисел матриці нам потрібні лише перші 4 (a, b, c, d) -
+    # решта 5 для звичайного повороту телефонної камери завжди стандартні
+    # і на кут не впливають.
+    a = read_fixed_point(payload[matrix_offset : matrix_offset + 4])
+    b = read_fixed_point(payload[matrix_offset + 4 : matrix_offset + 8])
+    c = read_fixed_point(payload[matrix_offset + 12 : matrix_offset + 16])
+    d = read_fixed_point(payload[matrix_offset + 16 : matrix_offset + 20])
+
+    width = int.from_bytes(payload[matrix_end : matrix_end + 4], byteorder="big")
+    height = int.from_bytes(payload[matrix_end + 4 : matrix_end + 8], byteorder="big")
+
+    return width, height, a, b, c, d
+
+
+def read_rotation_from_mp4(video_path):
+    """
+    Головна функція: відкриває MP4-файл і повертає кут повороту
+    ВІДЕО-треку (0, 90, 180 або 270).
+
+    Якщо щось пішло не так (файл биний, не MP4, нестандартна структура) -
+    ТИХО повертає 0, так само як поводиться застосунок зараз, коли
+    OpenCV не може прочитати метадані. Жодних винятків назовні -
+    аналіз відео не повинен падати через це.
+    """
+    try:
+        with open(video_path, "rb") as file:
+            file.seek(0, 2)  # у кінець файлу, щоб дізнатись його розмір
+            file_size = file.tell()
+
+            moov_location = _find_box(file, b"moov", 0, file_size)
+            if moov_location is None:
+                return 0  # немає moov - не схоже на нормальний MP4
+
+            moov_start, moov_size = moov_location
+            moov_end = moov_start + moov_size
+
+            # У файлі може бути кілька "trak" (наприклад відео + аудіо).
+            # Йдемо по них по черзі і беремо ПЕРШИЙ, у якого в tkhd
+            # стоять ненульові width/height - це і є відео-трек
+            # (в аудіо-треку ці поля завжди 0x0).
+            offset = moov_start
+            while offset < moov_end:
+                trak_location = _find_box(file, b"trak", offset, moov_end)
+                if trak_location is None:
+                    break  # більше треків нема
+
+                trak_start, trak_size = trak_location
+                trak_end = trak_start + trak_size
+
+                tkhd_location = _find_box(file, b"tkhd", trak_start, trak_end)
+                if tkhd_location is not None:
+                    tkhd_start, tkhd_size = tkhd_location
+                    fields = _read_tkhd_fields(file, tkhd_start, tkhd_size)
+                    if fields is not None:
+                        width, height, a, b, c, d = fields
+                        if width != 0 and height != 0:
+                            # Знайшли відео-трек - рахуємо кут і виходимо.
+                            return _matrix_to_angle(a, b, c, d)
+
+                # Це був не той trak (аудіо чи щось інше) - йдемо до наступного.
+                offset = trak_start + trak_size
+
+            return 0  # жодного відео-треку з нормальним tkhd не знайшли
+    except (OSError, struct.error, ValueError):
+        # Битий файл, обірваний запис, дивний контейнер - що завгодно.
+        # Не валимо аналіз відео через це, просто кажемо "без повороту".
+        return 0
+
+
+def _prepare_orientation(video, video_path):
     """
     Телефонні відео майже завжди мають метадані повороту - камеру
     тримали "на боці", а плеєр показує відео вертикально/горизонтально
     ЗАВДЯКИ цій метадані. OpenCV за замовчуванням її ІГНОРУЄ і віддає
     сирі, неповернуті кадри.
 
-    РАНІШЕ тут спершу пробували попросити OpenCV повертати кадри
-    самостійно через video.set(CAP_PROP_ORIENTATION_AUTO, 1) і, якщо
-    set() повертав True, вважали поворот "вирішеним" і одразу
-    поверталися з 0 (без ручного повороту).
+    РАНІШЕ тут кут читався через video.get(CAP_PROP_ORIENTATION_META).
+    На Android ця властивість НІКОЛИ не працює правильно - завжди
+    повертає 0, навіть коли відео насправді треба повернути. Через
+    це на телефоні всі вертикальні відео лягали "на бік" у звіті,
+    хоча той самий код на Mac (desktop-збірка OpenCV) працював
+    нормально.
 
-    ПРОБЛЕМА: на багатьох Android-збірках OpenCV (зокрема тих, що
-    йдуть у python-for-android/Buildozer) video.set(...) МОВЧКИ
-    повертає True - властивість формально "прийнялась" - але backend
-    її насправді ІГНОРУЄ, і кадри так і приходили неповернутими. Через
-    це вертикальні відео в звіті лягали "на бік" (кут зчитувався
-    правильно, але ніколи не застосовувався).
-
-    Тепер ми НЕ покладаємось на цей ненадійний прапорець і ЗАВЖДИ самі
-    читаємо кут із метаданих та повертаємо кадри вручну через
-    _apply_manual_rotation() - це працює однаково незалежно від збірки
-    OpenCV.
+    ТЕПЕР кут читається напряму з файлу через read_rotation_from_mp4()
+    (дивись коментар над цією функцією вище) - без участі OpenCV,
+    тому працює однаково на будь-якій платформі.
     """
-    try:
-        angle = int(video.get(_CAP_PROP_ORIENTATION_META)) % 360
-    except Exception:
-        angle = 0
+    angle = read_rotation_from_mp4(video_path)
 
     # ТИМЧАСОВИЙ DEBUG - видалити після діагностики повороту на Android.
-    # Виводить у logcat реальні розміри кадру та кут з метаданих,
-    # щоб побачити, що бачить САМЕ ця збірка OpenCV на пристрої.
+    # Виводить у logcat кут зі старого (ненадійного) способу поруч з
+    # новим, щоб наочно порівняти їх на реальному пристрої.
     try:
+        old_meta_angle = int(video.get(_CAP_PROP_ORIENTATION_META)) % 360
         w = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(f"[ROTATION_DEBUG] frame_w={w} frame_h={h} orientation_meta={angle}")
+        print(
+            f"[ROTATION_DEBUG] frame_w={w} frame_h={h} "
+            f"old_orientation_meta={old_meta_angle} tkhd_angle={angle}"
+        )
     except Exception as debug_error:
         print(f"[ROTATION_DEBUG] failed to read debug props: {debug_error}")
 
@@ -162,7 +388,7 @@ def extract_frames(video_path, max_frames=300, min_interval_sec=0.5):
     if not video.isOpened():
         raise ValueError(f"Не вдалось відкрити відео: {video_path}")
 
-    manual_rotation = _prepare_orientation(video)
+    manual_rotation = _prepare_orientation(video, video_path)
 
     fps = video.get(cv2.CAP_PROP_FPS) or 25.0
     total_frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -241,7 +467,7 @@ def grab_screenshot(video_path, timestamp_sec, save_path):
     нижче, вона відкриває файл лише ОДИН раз замість N.
     """
     video = cv2.VideoCapture(video_path)
-    manual_rotation = _prepare_orientation(video)
+    manual_rotation = _prepare_orientation(video, video_path)
 
     fps = video.get(cv2.CAP_PROP_FPS) or 25.0
     target_frame_index = max(0, int(round(timestamp_sec * fps)))
@@ -283,7 +509,7 @@ def grab_screenshots_batch(video_path, timestamp_and_path_list):
     Повертає set успішно збережених save_path.
     """
     video = cv2.VideoCapture(video_path)
-    manual_rotation = _prepare_orientation(video)
+    manual_rotation = _prepare_orientation(video, video_path)
     fps = video.get(cv2.CAP_PROP_FPS) or 25.0
 
     targets = sorted(
