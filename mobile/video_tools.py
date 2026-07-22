@@ -35,7 +35,25 @@ def _prepare_orientation(video):
         angle = int(video.get(_CAP_PROP_ORIENTATION_META)) % 360
     except Exception:
         angle = 0
+
+    # ТИМЧАСОВИЙ DEBUG - видалити після діагностики повороту на Android.
+    # Виводить у logcat реальні розміри кадру та кут з метаданих,
+    # щоб побачити, що бачить САМЕ ця збірка OpenCV на пристрої.
+    try:
+        w = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(f"[ROTATION_DEBUG] frame_w={w} frame_h={h} orientation_meta={angle}")
+    except Exception as debug_error:
+        print(f"[ROTATION_DEBUG] failed to read debug props: {debug_error}")
+
     return angle
+
+
+# ТИМЧАСОВИЙ DEBUG-ПЕРЕМИКАЧ - видалити після діагностики повороту.
+# True = застосовувати ручний поворот (як зараз), False = вимкнути його
+# повністю і подивитись, чи ця збірка OpenCV на Android повертає кадри
+# сама. Дозволяє перевірити обидва варіанти без правки коду нижче.
+DEBUG_APPLY_MANUAL_ROTATION = True
 
 
 def _apply_manual_rotation(frame, angle):
@@ -45,6 +63,8 @@ def _apply_manual_rotation(frame, angle):
     # переплутані місцями (застосовувався поворот У ЗВОРОТНОМУ напрямку) -
     # для кута 0/180 це непомітно (там напрямок симетричний), а от
     # вертикальні відео (90/270) через це крутило не в той бік.
+    if not DEBUG_APPLY_MANUAL_ROTATION:
+        return frame
     if angle == 90:
         return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
     if angle == 180:
