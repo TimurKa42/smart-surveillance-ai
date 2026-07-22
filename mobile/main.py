@@ -980,9 +980,19 @@ class MainScreen(Screen):
             Clock.schedule_once(lambda dt: self._show_results(results, prompt_text, generation))
 
         except gemini_tools.MissingApiKeyError:
-            Clock.schedule_once(lambda dt: self._on_pipeline_error(app.t("status_error", error="no API key"), generation))
+            error_text = app.t("status_error", error="no API key")
+            Clock.schedule_once(lambda dt: self._on_pipeline_error(error_text, generation))
         except Exception as error:
-            Clock.schedule_once(lambda dt: self._on_pipeline_error(app.t("status_error", error=error), generation))
+            # ВАЖЛИВО: app.t(...) з error треба викликати ТУТ, поки
+            # змінна error ще існує. Python автоматично видаляє змінну
+            # виключення (error) одразу після виходу з except-блоку -
+            # а Clock.schedule_once виконує лямбду ПІЗНІШЕ, асинхронно,
+            # вже ПІСЛЯ виходу з цього блоку. Через це раніше лямбда
+            # намагалась звернутись до вже видаленої error і застосунок
+            # падав з NameError замість того, щоб просто показати
+            # повідомлення про помилку.
+            error_text = app.t("status_error", error=error)
+            Clock.schedule_once(lambda dt: self._on_pipeline_error(error_text, generation))
 
     def _on_pipeline_error(self, text, generation):
         if self._is_cancelled(generation):
