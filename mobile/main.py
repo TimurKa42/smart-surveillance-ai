@@ -567,7 +567,16 @@ class LightboxModal(ModalView):
         # через pos_hint - це завжди працює однаково передбачувано.
         root = FloatLayout()
 
-        scatter = ScatterLayout(do_rotation=False, size_hint=(1, 1))
+        # auto_bring_to_front (True за замовчуванням) змушує Scatter
+        # переставляти самого себе на верх списку дітей FloatLayout
+        # ПРИ КОЖНОМУ дотику - включно з першим зумом/панорамуванням
+        # фото. Через це порядок обробки дотиків ламається: після
+        # першого ж жесту Scatter опиняється попереду top_bar у черзі
+        # на дотик і "з'їдає" тапи по кнопках Закрити/Зберегти, хоча
+        # візуально вони і так лежать зверху. Вимикаємо це явно, щоб
+        # кнопки залишались клікабельними завжди, незалежно від того,
+        # скільки разів до цього чіпали фото.
+        scatter = ScatterLayout(do_rotation=False, auto_bring_to_front=False, size_hint=(1, 1))
         img = AsyncImage(source=image_path, fit_mode="contain", size_hint=(1, 1))
         scatter.add_widget(img)
         root.add_widget(scatter)
@@ -677,13 +686,14 @@ class LightboxModal(ModalView):
         safe_top = app.safe_top if app else 0
         safe_right = app.safe_right if app else 0
         margin = dp(12)
+        margin_top = dp(20)
         self.top_bar.pos = (
             Window.width - self.top_bar.width - margin - safe_right,
-            Window.height - self.top_bar.height - margin - safe_top,
+            Window.height - self.top_bar.height - margin_top - safe_top,
         )
         self._feedback_label.pos = (
             (Window.width - self._feedback_label.width) / 2,
-            Window.height - self.top_bar.height - margin * 3,
+            Window.height - self.top_bar.height - margin_top - margin * 2,
         )
 
     def _unbind_reposition(self, *args):
