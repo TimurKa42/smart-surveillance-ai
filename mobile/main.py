@@ -6,6 +6,9 @@ import threading
 import time
 import webbrowser
 import shutil
+import json
+import uuid
+from datetime import datetime
 from kivy.uix.modalview import ModalView
 from kivy.uix.scatterlayout import ScatterLayout
 from kivy.uix.image import AsyncImage
@@ -37,6 +40,92 @@ import gemini_tools
 MAX_WORDS_IN_PROMPT = 200
 MAX_FRAMES = 150
 SCREENSHOTS_SUBFOLDER = "screenshots"
+HISTORY_META_FILENAME = "meta.json"
+
+
+def get_screenshots_dir(app):
+    """Єдина точка правди для шляху до теки з кадрами - щоб не було
+    двох різних місць, де він збирається по-різному."""
+    screenshots_dir = os.path.join(app.user_data_dir, SCREENSHOTS_SUBFOLDER)
+    os.makedirs(screenshots_dir, exist_ok=True)
+    return screenshots_dir
+
+
+def _history_meta_path(screenshots_dir):
+    return os.path.join(screenshots_dir, HISTORY_META_FILENAME)
+
+
+def load_history(screenshots_dir):
+    """
+    Повертає список записів історії (найновіші - першими). Кожен
+    запис: id, filename, found_at (ISO-рядок - коли Gemini ЗНАЙШОВ
+    цей кадр, тобто "зараз", а НЕ таймкод усередині відео),
+    timestamp_sec (той самий таймкод усередині відео - на майбутнє,
+    якщо колись знадобиться "відкрити відео на цьому місці"),
+    description, video_name.
+
+    Якщо meta.json пошкоджений або відсутній - повертаємо порожній
+    список, а не падаємо. Це навмисно "м'яка" функція.
+    """
+    path = _history_meta_path(screenshots_dir)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            records = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(records, list):
+        return []
+    records.sort(key=lambda r: r.get("found_at", ""), reverse=True)
+    return records
+
+
+def save_history(screenshots_dir, records):
+    path = _history_meta_path(screenshots_dir)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+
+
+def append_history_records(screenshots_dir, new_records):
+    """Дописує нові записи до вже наявної історії (не перезаписуючи
+    старі) - викликається після кожного успішного аналізу."""
+    records = load_history(screenshots_dir)
+    records.extend(new_records)
+    save_history(screenshots_dir, records)
+
+
+def migrate_legacy_screenshots(app):
+    """
+    До появи meta.json кадри зберігались як frame_<номер_кадру>.jpg -
+    БЕЗ жодного контексту (дати, опису) і, що важливіше, з іменами, які
+    гарантовано конфліктували між РІЗНИМИ відео (кадр №5 з одного
+    відео і кадр №5 з іншого - той самий файл, другий переписував
+    перший). Такі файли неможливо коректно вписати в історію знахідок
+    (нема дати, є ризик показати "чужий" кадр під чужим описом).
+
+    Тому одноразово, якщо meta.json ще не існує, а стара тека зі
+    скріншотами вже не порожня - просто повністю очищаємо її й
+    починаємо історію "з нуля" на нових, унікальних іменах файлів.
+    Викликається один раз при старті застосунку (App.build()).
+    """
+    screenshots_dir = get_screenshots_dir(app)
+    if os.path.exists(_history_meta_path(screenshots_dir)):
+        return
+
+    had_legacy_files = any(
+        name != HISTORY_META_FILENAME for name in os.listdir(screenshots_dir)
+    )
+    if had_legacy_files:
+        for name in os.listdir(screenshots_dir):
+            file_path = os.path.join(screenshots_dir, name)
+            try:
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+            except OSError:
+                pass
+
+    save_history(screenshots_dir, [])
 
 API_KEY_INSTRUCTIONS_URL = "https://aistudio.google.com/apikey"
 
@@ -448,6 +537,10 @@ class SettingsModal(ModalView):
 
         app.root.current = "setup"
 
+    def open_history(self):
+        self.dismiss()
+        HistoryModal().open()
+
     def test_vibrate(self, instance, value):
         # Довший імпульс (150мс), ніж звичайна мікровібрація на дотик
         # (15мс) - інакше різницю в амплітуді на повзунку майже не
@@ -456,7 +549,7 @@ class SettingsModal(ModalView):
 
 
 class LightboxModal(ModalView):
-    def __init__(self, image_path, **kwargs):
+    def __init__(self, image_path, description="", **kwargs):
         super().__init__(**kwargs)
         self.image_path = image_path
         self.size_hint = (1, 1)
@@ -513,6 +606,33 @@ class LightboxModal(ModalView):
 
         root.add_widget(self.top_bar)
 
+        # Підпис з описом Gemini знизу - потрібна для перегляду з
+        # історії знахідок (де саме фото без пояснення "що це і де"
+        # мало сенсу). Той самий прийом з капсулою-підкладкою, що й
+        # зверху - інакше текст губився б на світлому фото. Якщо
+        # опису нема (звичайний виклик лайтбокса зі звіту без
+        # передачі description) - просто не показуємо цей блок.
+        self._description_label = Label(
+            text=description, opacity=1 if description else 0,
+            size_hint=(0.86, None), size=(0, dp(48)),
+            color=(1, 1, 1, 1), font_size="14sp",
+            halign="center", valign="middle",
+            pos_hint={'center_x': 0.5, 'y': 0.035},
+        )
+        self._description_label.bind(
+            size=lambda w, v: setattr(w, "text_size", (w.width - dp(24), None))
+        )
+        if description:
+            with self._description_label.canvas.before:
+                Color(0, 0, 0, 0.55)
+                self._description_bg = RoundedRectangle(
+                    pos=self._description_label.pos, size=self._description_label.size, radius=[dp(18)]
+                )
+            self._description_label.bind(
+                pos=self._update_description_bg, size=self._update_description_bg
+            )
+        root.add_widget(self._description_label)
+
         self._feedback_label = Label(
             text="", opacity=0, size_hint=(None, None), size=(dp(220), dp(40)),
             color=(1, 1, 1, 1), bold=True,
@@ -536,6 +656,10 @@ class LightboxModal(ModalView):
     def _update_capsule_bg(self, *args):
         self._capsule_bg.pos = self.top_bar.pos
         self._capsule_bg.size = self.top_bar.size
+
+    def _update_description_bg(self, *args):
+        self._description_bg.pos = self._description_label.pos
+        self._description_bg.size = self._description_label.size
 
     def _update_feedback_bg(self, *args):
         self._feedback_bg.pos = self._feedback_label.pos
@@ -637,6 +761,155 @@ class LightboxModal(ModalView):
         Animation.cancel_all(self._feedback_label)
         anim = Animation(opacity=1, duration=1.1) + Animation(opacity=0, duration=0.4)
         anim.start(self._feedback_label)
+
+
+class HistoryRow(ButtonBehavior, BoxLayout):
+    """
+    Один рядок в історії знахідок: дата + час зверху-зліва, і -
+    ЛИШЕ в режимі вибору (selection_mode) - чекбокс справа. Уся
+    поведінка на тап (відкрити фото АБО перемкнути виділення - залежно
+    від режиму) обробляється в HistoryModal._on_row_tap(), рядок сам
+    по собі просто повідомляє про клік через звичайний on_release
+    ButtonBehavior.
+    """
+    scale = NumericProperty(1.0)
+    record_id = StringProperty("")
+    date_text = StringProperty("")
+    time_text = StringProperty("")
+    is_selected = BooleanProperty(False)
+    selection_mode = BooleanProperty(False)
+
+
+class HistoryModal(ModalView):
+    """
+    Повноцінна історія всіх знайдених кадрів за весь час (а не лише
+    останнього аналізу) - читає screenshots/meta.json.
+
+    Два режими:
+    - перегляд (selection_mode=False) - тап по рядку відкриває
+      LightboxModal з фото і описом Gemini;
+    - вибір (selection_mode=True) - тап по рядку перемикає чекбокс,
+      кнопка "Видалити" тепер видаляє позначені кадри (з
+      підтвердженням через ConfirmModal).
+    """
+    selection_mode = BooleanProperty(False)
+    has_records = BooleanProperty(False)
+    selected_count = NumericProperty(0)
+    records_count = NumericProperty(0)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.records = []
+        self.selected_ids = set()
+
+    def on_open(self):
+        self._reload()
+
+    def _reload(self):
+        app = App.get_running_app()
+        self.screenshots_dir = get_screenshots_dir(app)
+        self.records = load_history(self.screenshots_dir)
+        self.has_records = bool(self.records)
+        self.records_count = len(self.records)
+        self._rebuild_rows()
+
+    def _format_found_at(self, iso_str):
+        try:
+            dt = datetime.fromisoformat(iso_str)
+        except (ValueError, TypeError):
+            return "—", "—"
+        return dt.strftime("%d.%m.%Y"), dt.strftime("%H:%M")
+
+    def _rebuild_rows(self):
+        history_list = self.ids.history_list
+        history_list.clear_widgets()
+        for record in self.records:
+            date_text, time_text = self._format_found_at(record.get("found_at", ""))
+            row = HistoryRow(
+                record_id=record["id"],
+                date_text=date_text,
+                time_text=time_text,
+                is_selected=record["id"] in self.selected_ids,
+                selection_mode=self.selection_mode,
+            )
+            row.bind(on_release=lambda _row, r=record: self._on_row_tap(r))
+            history_list.add_widget(row)
+
+    def _on_row_tap(self, record):
+        if self.selection_mode:
+            haptic_feedback()
+            if record["id"] in self.selected_ids:
+                self.selected_ids.discard(record["id"])
+            else:
+                self.selected_ids.add(record["id"])
+            self.selected_count = len(self.selected_ids)
+            self._rebuild_rows()
+            return
+
+        screenshot_path = os.path.join(self.screenshots_dir, record["filename"])
+        if not os.path.exists(screenshot_path):
+            return
+        LightboxModal(screenshot_path, description=record.get("description", "")).open()
+
+    def toggle_select_all(self):
+        haptic_feedback()
+        if not self.selection_mode:
+            self.selection_mode = True
+        if len(self.selected_ids) == len(self.records) and self.records:
+            self.selected_ids = set()
+        else:
+            self.selected_ids = {record["id"] for record in self.records}
+        self.selected_count = len(self.selected_ids)
+        self._rebuild_rows()
+
+    def request_delete(self):
+        haptic_feedback()
+
+        # Кнопка "Видалити" - це і вхід у режим вибору, і кнопка
+        # підтвердження, залежно від поточного стану:
+        if not self.selection_mode:
+            self.selection_mode = True
+            self._rebuild_rows()
+            return
+
+        if not self.selected_ids:
+            # У режимі вибору, але нічого не позначено - трактуємо як
+            # "скасувати вибір", а не як "видалити нуль кадрів".
+            self.selection_mode = False
+            self.selected_count = 0
+            self._rebuild_rows()
+            return
+
+        app = App.get_running_app()
+        count = len(self.selected_ids)
+        message = (
+            f"Видалити {count} кадр(ів)? Цю дію не можна скасувати."
+            if app.language == 'ua' else
+            f"Delete {count} screenshot(s)? This can't be undone."
+        )
+        ConfirmModal(message_text=message, on_confirm=self._do_delete).open()
+
+    def _do_delete(self):
+        ids_to_delete = self.selected_ids
+        remaining = []
+        for record in self.records:
+            if record["id"] in ids_to_delete:
+                file_path = os.path.join(self.screenshots_dir, record["filename"])
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+            else:
+                remaining.append(record)
+
+        save_history(self.screenshots_dir, remaining)
+        self.records = remaining
+        self.has_records = bool(self.records)
+        self.records_count = len(self.records)
+        self.selected_ids = set()
+        self.selected_count = 0
+        self.selection_mode = False
+        self._rebuild_rows()
 
 
 class SetupScreen(Screen):
@@ -947,22 +1220,43 @@ class MainScreen(Screen):
                 return
             self._set_status_async("status_moments_found", generation, count=len(matches))
 
-            screenshots_dir = os.path.join(app.user_data_dir, SCREENSHOTS_SUBFOLDER)
-            os.makedirs(screenshots_dir, exist_ok=True)
+            screenshots_dir = get_screenshots_dir(app)
 
             results = []
             targets = []
+            # found_at - ОДИН спільний момент для всіх кадрів цього
+            # запуску аналізу (а не окремо для кожного кадру) - так
+            # усі знахідки одного аналізу логічно групуються під
+            # однією датою/часом в історії, що й очікувано для
+            # користувача ("це все - результати ось цього прогону").
+            found_at = datetime.now().isoformat()
+            video_name = os.path.basename(self.video_path) if self.video_path else ""
+            history_records = []
+
             for match in matches:
                 if not (0 <= match.frame_number < len(frames)):
                     continue
                 timestamp_sec = frames[match.frame_number]["timestamp_sec"]
-                screenshot_path = os.path.join(screenshots_dir, f"frame_{match.frame_number}.jpg")
+                # Унікальне ім'я файлу (а не frame_<номер кадру>.jpg,
+                # як було раніше) - інакше кадр №5 сьогоднішнього відео
+                # і кадр №5 завтрашнього іншого відео мовчки
+                # переписували б один одного на диску.
+                filename = f"{uuid.uuid4().hex}.jpg"
+                screenshot_path = os.path.join(screenshots_dir, filename)
                 targets.append((timestamp_sec, screenshot_path))
                 results.append({
                     "time_str": format_time(timestamp_sec),
                     "timestamp_sec": timestamp_sec,
                     "description": match.description,
                     "screenshot_path": screenshot_path,
+                })
+                history_records.append({
+                    "id": uuid.uuid4().hex,
+                    "filename": filename,
+                    "found_at": found_at,
+                    "timestamp_sec": timestamp_sec,
+                    "description": match.description,
+                    "video_name": video_name,
                 })
 
             if self._is_cancelled(generation):
@@ -971,7 +1265,18 @@ class MainScreen(Screen):
             # ОДИН прохід по відеофайлу для ВСІХ знайдених моментів -
             # замість grab_screenshot() у циклі, який відкривав файл
             # заново для кожного результату.
-            grab_screenshots_batch(self.video_path, targets)
+            saved_paths = grab_screenshots_batch(self.video_path, targets)
+
+            # У history_records записуємо ЛИШЕ ті кадри, які реально
+            # вдалось зберегти на диск (saved_paths) - інакше в
+            # meta.json з'явиться "мертвий" запис без файлу, і історія
+            # спробує показати неіснуючу картинку.
+            history_records = [
+                record for record in history_records
+                if os.path.join(screenshots_dir, record["filename"]) in saved_paths
+            ]
+            if history_records:
+                append_history_records(screenshots_dir, history_records)
 
             if self._is_cancelled(generation):
                 return
@@ -1092,6 +1397,8 @@ class SmartSurveillanceApp(App):
         self.vibration_enabled = settings.get("vibration_enabled", True)
         self.palette = theme.resolve(self.theme_name)
         Window.clearcolor = self.palette["bg"]
+
+        migrate_legacy_screenshots(self)
 
         Window.bind(size=self._on_window_size)
         self._on_window_size(Window, Window.size)
