@@ -284,19 +284,21 @@ DEBUG_APPLY_MANUAL_ROTATION = True
 
 def _apply_manual_rotation(frame, angle):
     # ВАЖЛИВО: кут з метаданих контейнера (MP4/QuickTime rotate matrix)
-    # означає "поверни кадр на цей кут ПРОТИ годинникової стрілки",
-    # щоб отримати правильну орієнтацію. Раніше тут 90 і 270 були
-    # переплутані місцями (застосовувався поворот У ЗВОРОТНОМУ напрямку) -
-    # для кута 0/180 це непомітно (там напрямок симетричний), а от
-    # вертикальні відео (90/270) через це крутило не в той бік.
+    # означає "поверни кадр на цей кут ЗА годинниковою стрілкою", щоб
+    # отримати правильну орієнтацію (це стандартна конвенція matrix-полів
+    # tkhd, якою користуються камери на кшталт Samsung S24). Напрямки
+    # для 90/270 були переплутані місцями - через це відео з камери
+    # (де кут реально 90 або 270, а не 0, як у перекодованих Telegram-
+    # відео) вертілось у зворотний бік, що на виході давало помітну
+    # різницю в 180° від правильної орієнтації.
     if not DEBUG_APPLY_MANUAL_ROTATION:
         return frame
     if angle == 90:
-        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
     if angle == 180:
         return cv2.rotate(frame, cv2.ROTATE_180)
     if angle == 270:
-        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
     return frame
 
 
