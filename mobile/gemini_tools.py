@@ -97,8 +97,10 @@ RESPONSE_SCHEMA = {
 # Gemini 3.x (і 3.5 Flash-Lite, і 3.6 Flash) більше НЕ підтримує
 # temperature/top_p/top_k у generationConfig - їх треба повністю
 # прибрати з payload, інакше API повертає помилку. Замість цього
-# з'явився thinking_level (рядок: "minimal"/"low"/"medium"/"high"),
-# що керує глибиною міркувань моделі перед відповіддю.
+# з'явився thinkingConfig.thinkingLevel - ВАЖЛИВО: це саме ВКЛАДЕНИЙ
+# об'єкт thinkingConfig з полем thinkingLevel у camelCase, а НЕ плоске
+# поле "thinking_level" напряму в generationConfig (це і спричиняло
+# 400 Bad Request - Gemini просто не розпізнавав такий параметр).
 #
 # Для нашої задачі (структурований пошук об'єкта на кадрах, відповідь
 # суворо за JSON-схемою) глибокі роздуми не потрібні - тому свідомо
@@ -230,7 +232,9 @@ def _analyze_batch(api_key, batch, index_offset, user_prompt, model_name, langua
         "generationConfig": {
             "response_mime_type": "application/json",
             "response_schema": RESPONSE_SCHEMA,
-            "thinking_level": THINKING_LEVEL_BY_MODEL.get(model_name, DEFAULT_THINKING_LEVEL),
+            "thinkingConfig": {
+                "thinkingLevel": THINKING_LEVEL_BY_MODEL.get(model_name, DEFAULT_THINKING_LEVEL),
+            },
         },
     }
 
