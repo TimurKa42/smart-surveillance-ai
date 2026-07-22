@@ -585,7 +585,7 @@
             size_hint_y: None
             height: dp(60)
             padding: [dp(12), dp(18), dp(12), dp(6)]
-            spacing: dp(8)
+            spacing: dp(10)
 
             GhostButton:
                 text: "Видалити" if app.language == 'ua' else "Delete"
@@ -593,34 +593,58 @@
                 color: (1, 1, 1, 1) if (root.selection_mode and root.selected_count) else app.palette["text_muted"]
                 bold: root.selection_mode
                 font_size: "14sp"
-                size_hint_x: None
-                width: dp(96)
+                size_hint: (None, None)
+                size: (dp(96), dp(36))
+                pos_hint: {"center_y": 0.5}
                 on_press: haptic_feedback()
                 on_release: root.request_delete()
 
-            SelectCheckboxIndicator:
-                is_selected: root.records_count > 0 and root.selected_count == root.records_count
-                opacity: 1 if root.has_records else 0.3
-                disabled: not root.has_records
-                on_release: root.toggle_select_all()
+            Widget:
+                # гнучкий проміжок - забирає весь вільний простір і
+                # відсуває групу "чекбокс+все" від "Видалити" ближче
+                # до центру рядка, щоб не тулились впритул одне до
+                # одного
+                size_hint_x: 1
 
-            Button:
-                text: "все" if app.language == 'ua' else "all"
-                background_normal: ""
-                background_down: ""
-                background_color: 0, 0, 0, 0
-                color: app.palette["text_muted"]
-                font_size: "13sp"
-                size_hint_x: None
-                width: dp(40)
-                disabled: not root.has_records
-                on_release: root.toggle_select_all()
+            BoxLayout:
+                # Один візуальний блок замість двох розрізнених елементів -
+                # чекбокс і слово "все" тепер завжди мають однакову висоту
+                # й центруються РАЗОМ, а не кожен сам по собі.
+                orientation: "horizontal"
+                size_hint: (None, None)
+                size: (dp(66), dp(36))
+                pos_hint: {"center_y": 0.5}
+                spacing: dp(6)
+
+                SelectCheckboxIndicator:
+                    is_selected: root.records_count > 0 and root.selected_count == root.records_count
+                    opacity: 1 if root.has_records else 0.3
+                    disabled: not root.has_records
+                    pos_hint: {"center_y": 0.5}
+                    on_release: root.toggle_select_all()
+
+                Button:
+                    text: "все" if app.language == 'ua' else "all"
+                    background_normal: ""
+                    background_down: ""
+                    background_color: 0, 0, 0, 0
+                    color: app.palette["text_muted"]
+                    font_size: "13sp"
+                    halign: "left"
+                    valign: "middle"
+                    text_size: self.width, self.height
+                    padding: [dp(4), 0]
+                    disabled: not root.has_records
+                    on_release: root.toggle_select_all()
 
             Widget:
+                size_hint_x: None
+                width: dp(6)
 
             CloseButton:
                 size_hint: (None, None)
                 size: (dp(40), dp(40))
+                pos_hint: {"center_y": 0.5}
                 on_release: root.dismiss()
 
         FloatLayout:
