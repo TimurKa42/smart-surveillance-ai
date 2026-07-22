@@ -483,10 +483,16 @@
                     on_touch_down:
                         if self.collide_point(*args[1].pos) and self.opacity == 1: root.open_lightbox(self.source)
 
-<SelectCheckboxIndicator@Widget>:
-    # Просто ВІЗУАЛЬНИЙ індикатор вибору (не окрема кнопка) - весь
-    # рядок HistoryRow і так тапабельний цілком (ButtonBehavior), тому
-    # чекбоксу не потрібна власна логіка на дотик, лише малювання.
+<SelectCheckboxIndicator@ButtonBehavior+Widget>:
+    # Візуальний індикатор вибору. У HistoryRow він лежить всередині
+    # рядка, який і так тапабельний цілком (ButtonBehavior на самому
+    # HistoryRow) - там власний on_release не потрібен. А ось у шапці
+    # HistoryModal («Всі») це САМОСТІЙНИЙ елемент поруч зі словом
+    # "Всі" - раніше клік по самому квадратику нічого не робив, бо
+    # Widget не вміє реагувати на дотик. ButtonBehavior вирішує це:
+    # тепер по ньому теж можна тапнути, а HistoryRow просто ігнорує
+    # власний on_release індикатора (в нього своя логіка на рівні
+    # рядка).
     is_selected: False
     size_hint: (None, None)
     size: (dp(26), dp(26))
@@ -553,6 +559,12 @@
         opacity: 1 if root.selection_mode else 0
         size_hint_x: None
         width: dp(30) if root.selection_mode else 0
+        # Індикатор тепер сам ButtonBehavior (треба для кліку по
+        # квадратику "Всі" в шапці) - тому в межах рядка він би
+        # перехоплював дотик на собі і "з'їдав" тап, не даючи ряду
+        # відреагувати. Тут просто прокидуємо його on_release назад
+        # на сам рядок - поведінка лишається такою ж, як була.
+        on_release: root.dispatch("on_release")
 
 <HistoryModal>:
     size_hint: (0.86, 0.8)
@@ -571,15 +583,13 @@
 
         BoxLayout:
             size_hint_y: None
-            height: dp(48)
-            padding: [dp(12), dp(6)]
+            height: dp(60)
+            padding: [dp(12), dp(18), dp(12), dp(6)]
             spacing: dp(8)
 
-            Button:
+            GhostButton:
                 text: "Видалити" if app.language == 'ua' else "Delete"
-                background_normal: ""
-                background_down: ""
-                background_color: app.palette["danger"] if (root.selection_mode and root.selected_count) else app.palette["surface_alt"]
+                accent_color: app.palette["danger"] if (root.selection_mode and root.selected_count) else app.palette["surface_alt"]
                 color: (1, 1, 1, 1) if (root.selection_mode and root.selected_count) else app.palette["text_muted"]
                 bold: root.selection_mode
                 font_size: "14sp"
@@ -592,6 +602,7 @@
                 is_selected: root.records_count > 0 and root.selected_count == root.records_count
                 opacity: 1 if root.has_records else 0.3
                 disabled: not root.has_records
+                on_release: root.toggle_select_all()
 
             Button:
                 text: "все" if app.language == 'ua' else "all"
@@ -671,11 +682,9 @@
                 on_press: haptic_feedback()
                 on_release: root.dismiss()
 
-            Button:
+            GhostButton:
                 text: "Так" if app.language == 'ua' else "Yes"
-                background_normal: ""
-                background_down: ""
-                background_color: app.palette["danger"]
+                accent_color: app.palette["danger"]
                 color: 1, 1, 1, 1
                 bold: True
                 on_press: haptic_feedback()
@@ -781,13 +790,11 @@
             height: dp(45)
             on_release: root.open_history()
 
-        Button:
+        GhostButton:
             text: "Скинути API Ключ" if app.language == 'ua' else "Reset API Key"
-            background_normal: ""
-            background_down: ""
             color: 1, 1, 1, 1
             bold: True
-            background_color: app.palette["danger"]
+            accent_color: app.palette["danger"]
             size_hint_y: None
             height: dp(45)
             on_press: haptic_feedback()
