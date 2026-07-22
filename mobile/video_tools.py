@@ -39,12 +39,18 @@ def _prepare_orientation(video):
 
 
 def _apply_manual_rotation(frame, angle):
+    # ВАЖЛИВО: кут з метаданих контейнера (MP4/QuickTime rotate matrix)
+    # означає "поверни кадр на цей кут ПРОТИ годинникової стрілки",
+    # щоб отримати правильну орієнтацію. Раніше тут 90 і 270 були
+    # переплутані місцями (застосовувався поворот У ЗВОРОТНОМУ напрямку) -
+    # для кута 0/180 це непомітно (там напрямок симетричний), а от
+    # вертикальні відео (90/270) через це крутило не в той бік.
     if angle == 90:
-        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
     if angle == 180:
         return cv2.rotate(frame, cv2.ROTATE_180)
     if angle == 270:
-        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
     return frame
 
 
