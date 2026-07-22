@@ -347,8 +347,10 @@
                 id: choose_gallery_btn
                 text: root.gallery_btn_text
                 halign: "center"
+                valign: "middle"
                 font_size: "13sp"
                 size_hint_x: 0.32
+                text_size: self.width - dp(8), None
                 on_release: root.choose_video_from_gallery()
 
             RoundedLabel:
