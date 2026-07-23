@@ -173,6 +173,34 @@
             cap: "round"
     canvas.after:
         PopMatrix
+
+<InfoButton>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    text: ""
+    on_press: animate_press(self)
+    on_release: animate_release(self)
+    canvas.before:
+        PushMatrix
+        Scale:
+            origin: self.center
+            x: self.scale
+            y: self.scale
+        Color:
+            rgba: app.palette["danger"]
+        Line:
+            circle: (self.center_x, self.center_y, self.width / 2 - dp(1.5))
+            width: dp(1.6)
+        Line:
+            points: [self.center_x, self.y + self.height * 0.28, self.center_x, self.y + self.height * 0.62]
+            width: dp(1.8)
+            cap: "round"
+        Ellipse:
+            pos: (self.center_x - dp(1.6), self.y + self.height * 0.68)
+            size: (dp(3.2), dp(3.2))
+    canvas.after:
+        PopMatrix
 <MenuButton@Button>:
     # Окремий клас, а НЕ GhostButton з перевизначеним accent_color.
     # Причина: у GhostButton є базове правило
@@ -617,7 +645,7 @@
                 # "чекбокс+все" тепер стоїть близько до кнопки, а не
                 # притиснута до правого краю рядка
                 size_hint_x: None
-                width: dp(16)
+                width: dp(6)
 
             BoxLayout:
                 # Один візуальний блок замість двох розрізнених елементів -
@@ -666,6 +694,8 @@
             padding: [0, 0, 0, dp(8)]
             ScrollView:
                 do_scroll_x: False
+                size_hint: (1, 1)
+                pos_hint: {'x': 0, 'y': 0}
                 BoxLayout:
                     id: history_list
                     orientation: "vertical"
@@ -680,6 +710,82 @@
                 pos_hint: {'center_x': 0.5, 'center_y': 0.5}
                 halign: "center"
                 valign: "middle"
+
+<AboutModal>:
+    size_hint: (0.86, 0.8)
+    background_color: 0, 0, 0, 0.6
+    pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+
+    BoxLayout:
+        orientation: "vertical"
+        canvas.before:
+            Color:
+                rgba: app.palette["surface"]
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(20)]
+            StencilPush
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(20)]
+            StencilUse
+        canvas.after:
+            StencilUnUse
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(20)]
+            StencilPop
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(60)
+            padding: [dp(16), dp(18), dp(12), dp(6)]
+
+            RoundedLabel:
+                text: app.language and app.t("about_title")
+                font_size: "18sp"
+                bold: True
+                halign: "left"
+                valign: "middle"
+                text_size: self.width, self.height
+
+            CloseButton:
+                size_hint: (None, None)
+                size: (dp(40), dp(40))
+                pos_hint: {'center_y': 0.5}
+                on_release: root.dismiss()
+
+        ScrollView:
+            do_scroll_x: False
+            BoxLayout:
+                orientation: "vertical"
+                size_hint_y: None
+                height: self.minimum_height
+                padding: [dp(16), dp(4), dp(16), dp(16)]
+                spacing: dp(18)
+
+                SubtleLabel:
+                    text: app.language and app.t("about_body")
+                    font_size: "14sp"
+                    halign: "left"
+                    valign: "top"
+                    text_size: self.width, None
+                    size_hint_y: None
+                    height: self.texture_size[1]
+
+                SubtleLabel:
+                    text: app.language and app.t("about_copyright")
+                    font_size: "12sp"
+                    bold: True
+                    halign: "left"
+                    valign: "top"
+                    text_size: self.width, None
+                    size_hint_y: None
+                    height: self.texture_size[1]
+                    opacity: 0.7
 
 <ConfirmModal>:
     size_hint: (0.85, None)
@@ -757,6 +863,11 @@
         RelativeLayout:
             size_hint_y: None
             height: dp(40)
+            InfoButton:
+                size_hint: (None, None)
+                size: (dp(32), dp(32))
+                pos_hint: {'x': 0, 'center_y': 0.5}
+                on_release: root.open_about()
             RoundedLabel:
                 text: "Налаштування" if app.language == 'ua' else "Settings"
                 font_size: "18sp"
