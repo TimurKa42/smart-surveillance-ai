@@ -68,6 +68,28 @@ TEXTS = {
         "history_empty": "Кадрів не знайдено",
         "history_deleted": "Кадри видалено",
         "history_delete_failed": "Не вдалось видалити",
+
+        # ---- про застосунок (AboutModal) ----
+        "about_title": "Про застосунок",
+        "about_body": (
+            "Smart Surveillance AI допомагає швидко знайти потрібні "
+            "моменти на відео з камер спостереження за допомогою "
+            "штучного інтелекту.\n\n"
+            "Як користуватись:\n\n"
+            "1. Натисни «Обрати відео» і вибери запис з пристрою.\n\n"
+            "2. У полі нижче напиши, кого або що потрібно знайти - "
+            "наприклад, «людина в червоній куртці» або «собака».\n\n"
+            "3. Обери модель аналізу: 3.5 Flash-Lite працює швидше, "
+            "3.6 Flash - точніше розпізнає складні випадки.\n\n"
+            "4. Натисни «Почати аналіз» і зачекай - відео нарізається "
+            "на кадри, а нейромережа переглядає їх і шукає збіги.\n\n"
+            "5. Коли аналіз завершиться, знайдені моменти можна "
+            "переглянути в «Меню» → «Переглянути кадри». Звідти ж "
+            "кадри можна зберегти в галерею або видалити.\n\n"
+            "Ключ Gemini API зберігається лише на пристрої і ніколи "
+            "нікуди не передається окрім прямих запитів до Google Gemini."
+        ),
+        "about_copyright": "Корпорація Тимур Каленик, 2026",
     },
     LANG_EN: {
         "choose_video": "Choose\nvideo",
@@ -117,6 +139,31 @@ TEXTS = {
         "history_empty": "No frames found",
         "history_deleted": "Frames deleted",
         "history_delete_failed": "Failed to delete",
+
+        # ---- about the app (AboutModal) ----
+        "about_title": "About the app",
+        "about_body": (
+            "Smart Surveillance AI helps you quickly find the moments "
+            "you need in security camera footage using artificial "
+            "intelligence.\n\n"
+            "How to use it:\n\n"
+            "1. Tap \u201cChoose video\u201d and pick a recording from your "
+            "device.\n\n"
+            "2. In the field below, write who or what you want to find - "
+            "for example, \u201cperson in a red jacket\u201d or \u201cdog\u201d.\n\n"
+            "3. Pick an analysis model: 3.5 Flash-Lite works faster, "
+            "3.6 Flash recognizes tricky cases more accurately.\n\n"
+            "4. Tap \u201cStart analysis\u201d and wait - the video gets cut "
+            "into frames, and the neural network scans them for "
+            "matches.\n\n"
+            "5. Once the analysis is done, you can view the found "
+            "moments from \u201cMenu\u201d \u2192 \u201cView screenshots\u201d. From there "
+            "you can also save frames to the gallery or delete them.\n\n"
+            "Your Gemini API key is stored only on your device and is "
+            "never sent anywhere except in direct requests to Google "
+            "Gemini."
+        ),
+        "about_copyright": "Timur Kalenyk Corporation, 2026",
     },
 }
 
