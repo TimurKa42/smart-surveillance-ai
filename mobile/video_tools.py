@@ -345,6 +345,71 @@ FORCE_KEEP_EVERY = 12
 CANDIDATE_OVERSAMPLE = 3
 
 
+# ---------------------------------------------------------------------------
+# "Важкі" відео (HEVC + високий fps) - чесний компроміс без нативного
+# декодера
+# ---------------------------------------------------------------------------
+#
+# Нативно (через ffmpeg/MediaCodec напряму) можна було б декодувати лише
+# опорні кадри (keyframes) і зовсім пропускати решту - але це кілька
+# годин роботи з інтеграцією під Android. Тут же чесно визнаємо: раз
+# OpenCV все одно змушений ПОСЛІДОВНО прогнати кожен кадр через
+# grab() (для HEVC це завжди повне декодування, бо кадри всередині GOP
+# залежать один від одного - на відміну від H.264, де така сама
+# послідовна прогонка теж декодує кожен кадр, але сам кодек "легший"
+# і швидший), - зменшити можна лише те, що йде ПІСЛЯ grab(): скільки
+# разів ми викликаємо retrieve() + resize() + cvtColor() + absdiff()
+# для кандидатів. Для "важкого" відео просто перевіряємо кандидатів
+# рідше - весь декодуючий прохід все одно залишається, зате менше
+# зайвої роботи по дорозі.
+
+_HEVC_FOURCC_CODES = {"hvc1", "hev1", "HEVC", "H265", "x265"}
+
+# Вище цього fps + HEVC-кодек вважаємо відео "важким". 30 - типовий
+# fps звичайного телефонного відео, тому поріг ставимо саме тут:
+# 60 fps HEVC (часте для "уповільненої зйомки" чи сучасних камер)
+# майже вдвічі більше кадрів на ту саму тривалість - і всі вони йдуть
+# через дорогий декодер.
+HEAVY_CODEC_FPS_THRESHOLD = 30
+
+# У скільки разів рідше перевіряємо кандидатів на кадр для "важкого"
+# відео. Підібрано емпірично: помітно менше retrieve()/resize()/
+# детекцій руху за прохід, а FORCE_KEEP_EVERY і так підстраховує від
+# пропуску статичних об'єктів (кут не змінюється, лиш густина перевірок).
+HEAVY_CODEC_INTERVAL_MULTIPLIER = 2.5
+
+
+def _read_fourcc(video):
+    """
+    Читає FourCC-код кодека з відкритого VideoCapture і повертає його
+    звичайним рядком (напр. "hvc1", "avc1"), у верхньому регістрі не
+    приводимо навмисно - FourCC-коди регістрозалежні за специфікацією.
+
+    CAP_PROP_FOURCC повертає ціле число, "запаковане" як 4 ASCII-байти -
+    розпаковуємо назад у рядок через struct.
+    """
+    fourcc_int = int(video.get(cv2.CAP_PROP_FOURCC))
+    if fourcc_int <= 0:
+        return ""
+    try:
+        return struct.pack("<I", fourcc_int).decode("ascii", errors="ignore").strip("\x00")
+    except (struct.error, UnicodeDecodeError):
+        return ""
+
+
+def _is_heavy_video(video, fps):
+    """
+    "Важке" відео = HEVC (H.265/x265) + fps вище HEAVY_CODEC_FPS_THRESHOLD.
+
+    Якщо FourCC не вдалось прочитати (fourcc_int == 0, буває на деяких
+    Android-збірках OpenCV для окремих контейнерів) - чесно вважаємо
+    відео НЕ важким і залишаємо звичайну, більш густу перевірку
+    кандидатів. Краще зайва перевірка, ніж помилково пропущений рух.
+    """
+    fourcc = _read_fourcc(video)
+    return fourcc in _HEVC_FOURCC_CODES and fps > HEAVY_CODEC_FPS_THRESHOLD
+
+
 def _has_motion(prev_gray, current_gray, threshold_percent=MOTION_THRESHOLD_PERCENT):
     """
     Порівнює два кадри (у відтінках сірого) і визначає, чи було між
@@ -368,11 +433,11 @@ def extract_frames(video_path, max_frames=300, min_interval_sec=0.5):
     """
     Швидка й "розумна" нарізка відео на кадри для відправки в Gemini.
 
-    Тут ДВІ сходинки економії:
+    Тут ТРИ сходинки економії:
 
     1) Швидке читання без сикання - відео читається ПОСЛІДОВНО:
-       video.grab() дешево прогортає кадр без декодування,
-       video.retrieve() декодує картинку лише у "кандидатів"
+       video.grab() дешево прогортає кадр без декодування (для звичайного
+       H.264), video.retrieve() декодує картинку лише у "кандидатів"
        (раз на interval_frames).
 
     2) Детекція руху (cv2.absdiff) - з кандидатів у підсумковий набір
@@ -382,6 +447,13 @@ def extract_frames(video_path, max_frames=300, min_interval_sec=0.5):
        цьому перевіряємо густіше (CANDIDATE_OVERSAMPLE), щоб детектору
        було з чого обирати, а FORCE_KEEP_EVERY підстраховує від
        пропуску статичних об'єктів (див. коментар біля константи вище).
+
+    3) Для "важких" відео (HEVC + fps > HEAVY_CODEC_FPS_THRESHOLD), де
+       навіть grab() змушений повністю декодувати кожен кадр - кандидатів
+       перевіряємо ще рідше (HEAVY_CODEC_INTERVAL_MULTIPLIER). Сам
+       декодуючий прохід від цього не коротшає, зате менше зайвих
+       retrieve()/resize()/детекцій руху по дорозі. Див. коментар біля
+       _is_heavy_video().
 
     Підсумкових кадрів завжди буде НЕ БІЛЬШЕ max_frames, але зазвичай
     помітно менше - рівно стільки, скільки реально знадобилось.
@@ -398,6 +470,14 @@ def extract_frames(video_path, max_frames=300, min_interval_sec=0.5):
 
     candidate_budget = max_frames * CANDIDATE_OVERSAMPLE
     interval_sec = max(min_interval_sec, duration_sec / candidate_budget) if duration_sec else min_interval_sec
+
+    is_heavy = _is_heavy_video(video, fps)
+    if is_heavy:
+        # Прохід через декодер все одно буде повним (див. коментар
+        # біля _is_heavy_video вище) - економимо на тому, що можемо:
+        # рідше робимо retrieve()+resize()+cvtColor()+absdiff().
+        interval_sec *= HEAVY_CODEC_INTERVAL_MULTIPLIER
+
     interval_frames = max(1, round(interval_sec * fps))
 
     frames = []
