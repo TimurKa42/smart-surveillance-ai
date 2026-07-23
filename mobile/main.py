@@ -541,11 +541,28 @@ class SettingsModal(ModalView):
         self.dismiss()
         HistoryModal().open()
 
+    def open_about(self):
+        self.dismiss()
+        AboutModal().open()
+
     def test_vibrate(self, instance, value):
         # Довший імпульс (150мс), ніж звичайна мікровібрація на дотик
         # (15мс) - інакше різницю в амплітуді на повзунку майже не
         # відчутно, і повзунок знову здаватиметься "неробочим".
         haptic_feedback(amplitude=value, duration_ms=150)
+
+
+class AboutModal(ModalView):
+    """
+    Міні-стаття "Про застосунок" - як користуватись + копірайт.
+    Розмір і поведінка (шторка, що виїжджає знизу) навмисно такі ж,
+    як у HistoryModal ("Переглянути кадри"), щоб виглядати узгоджено.
+    """
+
+    def on_open(self):
+        target_y = self.y
+        self.y = -self.height
+        Animation(y=target_y, duration=0.22, t="out_cubic").start(self)
 
 
 class LightboxModal(ModalView):
@@ -1040,6 +1057,15 @@ class CloseButton(Button):
     і виглядало як "перекреслений прямокутник" на скріні). Тепер
     хрестик малюється вручну двома лініями в canvas .kv-правила -
     він не залежить від того, чи є потрібний символ у шрифті.
+    """
+    scale = NumericProperty(1.0)
+
+
+class InfoButton(Button):
+    """
+    Кругла кнопка "i" в шапці "Налаштування" - відкриває AboutModal.
+    Малюється так само, як CloseButton (обведення + гліф в canvas),
+    щоб не залежати від наявності символу "ℹ" у системному шрифті.
     """
     scale = NumericProperty(1.0)
 
