@@ -1071,6 +1071,11 @@ class InfoButton(Button):
 class MainScreen(Screen):
     gallery_btn_text = StringProperty("")
 
+    # 0..100. Керує видимістю й заповненням прогрес-піла поруч зі
+    # статус-лейблом. 0 (за замовчуванням) означає "аналіз не йде" -
+    # піл прихований, а не просто показує порожню смужку.
+    analysis_progress = NumericProperty(0)
+
     # Лічильник "поколінь" аналізу. Кожен запуск start_analysis()
     # збільшує його на 1 і "запам'ятовує" своє число. Фоновий потік
     # extract_frames()/Gemini не можна перервати миттєво в середині
@@ -1191,6 +1196,7 @@ class MainScreen(Screen):
         self.ids.screenshot_image.opacity = 0
 
         self.ids.start_btn.disabled = False
+        self.analysis_progress = 0
         self._refresh_model_buttons()
 
     def start_analysis(self):
@@ -1214,6 +1220,7 @@ class MainScreen(Screen):
 
         self.ids.start_btn.disabled = True
         self.ids.status_label.text = app.t("status_cutting_frames")
+        self.analysis_progress = 3
 
         # Стираємо старий звіт одразу, а не чекаємо готовності нового -
         # інакше на екрані лишаються результати ПОПЕРЕДНЬОГО відео, і
@@ -1242,6 +1249,24 @@ class MainScreen(Screen):
 
         Clock.schedule_once(_apply)
 
+    def _set_progress_async(self, value, generation):
+        def _apply(dt):
+            if self._is_cancelled(generation):
+                return
+            self.analysis_progress = value
+
+        Clock.schedule_once(_apply)
+
+    def _on_gemini_batch_progress(self, done, total, generation):
+        # Викликається з фонового потоку (ThreadPoolExecutor у
+        # gemini_tools) - тому й тут одразу йдемо через
+        # Clock.schedule_once, а не чіпаємо Kivy-властивість напряму.
+        # Це найдовший етап пайплайна, тож віддаємо йому найбільший
+        # діапазон прогресу: 15% (кадри вже нарізані) .. 80%
+        # (усі пачки Gemini відповіли, лишається зберегти скріншоти).
+        fraction = done / total if total else 1
+        self._set_progress_async(15 + fraction * 65, generation)
+
     def _run_pipeline(self, prompt_text, model_name, language, generation):
         app = App.get_running_app()
         try:
@@ -1249,17 +1274,23 @@ class MainScreen(Screen):
             if self._is_cancelled(generation):
                 return
             self._set_status_async("status_frames_cut", generation, count=len(frames))
+            self._set_progress_async(15, generation)
 
             # find_object_in_frames тепер аналізує пачки кадрів
             # ПАРАЛЕЛЬНО (до 4 одночасно) замість послідовного циклу -
             # це основне прискорення для відео з великою кількістю
             # кадрів (кілька пачок по BATCH_SIZE=40).
             matches = gemini_tools.find_object_in_frames(
-                frames, prompt_text, model_name=model_name, language=language
+                frames,
+                prompt_text,
+                model_name=model_name,
+                language=language,
+                progress_callback=lambda done, total: self._on_gemini_batch_progress(done, total, generation),
             )
             if self._is_cancelled(generation):
                 return
             self._set_status_async("status_moments_found", generation, count=len(matches))
+            self._set_progress_async(82, generation)
 
             screenshots_dir = get_screenshots_dir(app)
 
@@ -1321,6 +1352,7 @@ class MainScreen(Screen):
 
             if self._is_cancelled(generation):
                 return
+            self._set_progress_async(96, generation)
 
             results.sort(key=lambda r: r["timestamp_sec"])
             Clock.schedule_once(lambda dt: self._show_results(results, prompt_text, generation))
@@ -1354,6 +1386,7 @@ class MainScreen(Screen):
             return
         self.ids.status_label.text = text
         self.ids.start_btn.disabled = False
+        self.analysis_progress = 0
 
     def _show_results(self, results, prompt_text, generation):
         if self._is_cancelled(generation):
@@ -1366,6 +1399,12 @@ class MainScreen(Screen):
         self.ids.start_btn.disabled = False
         self.ids.status_label.text = app.t("status_done", count=len(results))
         self.results = results
+
+        # Коротка пауза на 100%, щоб користувач встиг побачити
+        # завершення, а тоді піл ховається - інакше застосунок
+        # "забуває" прибрати прогрес і той висить назавжди на 100%.
+        self.analysis_progress = 100
+        Clock.schedule_once(lambda dt: setattr(self, "analysis_progress", 0), 0.6)
 
         self.ids.report_list.clear_widgets()
 
