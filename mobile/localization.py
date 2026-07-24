@@ -61,6 +61,14 @@ TEXTS = {
         # ---- вибір відео ----
         "status_video_open_failed": "Не вдалося відкрити обраний файл. Спробуй ще раз",
 
+        # ---- помилки Gemini API (gemini_tools.GeminiApiError.kind) ----
+        "error_network": "Немає з'єднання з інтернетом. Перевір підключення, будь ласка",
+        "error_timeout": "Сервер не відповів вчасно. Спробуй ще раз",
+        "error_rate_limit": "Забагато запитів. Зачекай трохи і спробуй ще раз",
+        "error_invalid_key": "Проблема з API-ключем. Перевір його в налаштуваннях",
+        "error_server": "Сервіс Gemini тимчасово недоступний. Спробуй пізніше",
+        "error_unknown": "Щось пішло не так. Спробуй ще раз",
+
         # ---- історія кадрів (HistoryModal) ----
         "history_view_frames": "Переглянути кадри",
         "history_delete_all": "Видалити все",
@@ -84,7 +92,7 @@ TEXTS = {
             "4. Натисни «Почати аналіз» і зачекай - відео нарізається "
             "на кадри, а нейромережа переглядає їх і шукає збіги.\n\n"
             "5. Коли аналіз завершиться, знайдені моменти можна "
-            "переглянути в «Меню» → «Переглянути кадри». Звідти ж "
+            "переглянути в «Меню» -> «Переглянути кадри». Звідти ж "
             "кадри можна зберегти в галерею або видалити.\n\n"
             "Ключ Gemini API зберігається лише на пристрої і ніколи "
             "нікуди не передається окрім прямих запитів до Google Gemini."
@@ -132,6 +140,14 @@ TEXTS = {
         # ---- video picking ----
         "status_video_open_failed": "Couldn't open the selected file. Please try again",
 
+        # ---- Gemini API errors (gemini_tools.GeminiApiError.kind) ----
+        "error_network": "No internet connection. Please check your network",
+        "error_timeout": "The server didn't respond in time. Please try again",
+        "error_rate_limit": "Too many requests. Wait a bit and try again",
+        "error_invalid_key": "There's a problem with your API key. Check it in settings",
+        "error_server": "Gemini is temporarily unavailable. Please try again later",
+        "error_unknown": "Something went wrong. Please try again",
+
         # ---- frame history (HistoryModal) ----
         "history_view_frames": "View frames",
         "history_delete_all": "Delete all",
@@ -157,7 +173,7 @@ TEXTS = {
             "into frames, and the neural network scans them for "
             "matches.\n\n"
             "5. Once the analysis is done, you can view the found "
-            "moments from \u201cMenu\u201d \u2192 \u201cView screenshots\u201d. From there "
+            "moments from \u201cMenu\u201d -> \u201cView screenshots\u201d. From there "
             "you can also save frames to the gallery or delete them.\n\n"
             "Your Gemini API key is stored only on your device and is "
             "never sent anywhere except in direct requests to Google "
