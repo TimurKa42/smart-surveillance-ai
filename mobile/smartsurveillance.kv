@@ -11,6 +11,30 @@
     color: app.palette["text_muted"]
     font_size: "13sp"
 
+<ProgressPill@Widget>:
+    # Маленька капсула-індикатор прогресу аналізу (0..100), схожа на
+    # індикатор заряду в статус-барі телефону - саме так її й
+    # намалював користувач у своєму ескізі. Порожня "доріжка" -
+    # app.palette["surface_alt"], заповнення - зелене (фіксований
+    # колір, не з палітри теми, бо зелений "прогрес завершується"
+    # має читатись однаково і на світлій, і на темній темі).
+    progress: 0
+    size_hint_y: None
+    height: dp(14)
+    canvas.before:
+        Color:
+            rgba: app.palette["surface_alt"]
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+        Color:
+            rgba: (0.20, 0.78, 0.38, 1)
+        RoundedRectangle:
+            pos: self.pos
+            size: [max(self.height, self.width * min(max(self.progress, 0), 100) / 100.0), self.height]
+            radius: [self.height / 2]
+
 <AccentButton@Button>:
     scale: 1.0
     background_normal: ""
@@ -461,13 +485,34 @@
                     model_name: "gemini-3.6-flash"
                     on_release: root.select_model(self.model_name)
 
-        SubtleLabel:
-            id: status_label
+        BoxLayout:
             size_hint_y: None
             height: dp(20)
-            font_size: "12sp"
-            halign: "left"
-            text_size: self.width, None
+            spacing: dp(6)
+
+            SubtleLabel:
+                id: status_label
+                font_size: "12sp"
+                halign: "left"
+                text_size: self.width, None
+
+            ProgressPill:
+                id: analysis_progress_pill
+                progress: root.analysis_progress
+                size_hint_x: None
+                width: dp(64) if root.analysis_progress > 0 else 0
+                opacity: 1 if root.analysis_progress > 0 else 0
+
+            SubtleLabel:
+                id: analysis_progress_percent
+                text: f"{int(root.analysis_progress)}%" if root.analysis_progress > 0 else ""
+                bold: True
+                color: app.palette["text"]
+                font_size: "11sp"
+                size_hint_x: None
+                width: dp(30) if root.analysis_progress > 0 else 0
+                halign: "right"
+                text_size: self.width, None
 
         BoxLayout:
             spacing: dp(10)
