@@ -188,12 +188,20 @@ def _get_api_key():
     return api_key
 
 
-def find_object_in_frames(frames, user_prompt, model_name=DEFAULT_MODEL_NAME, language=DEFAULT_PROMPT_LANGUAGE):
+def find_object_in_frames(
+    frames, user_prompt, model_name=DEFAULT_MODEL_NAME, language=DEFAULT_PROMPT_LANGUAGE, progress_callback=None
+):
     """
     Розбиває кадри на пачки по BATCH_SIZE і аналізує їх ПАРАЛЕЛЬНО
     (до MAX_PARALLEL_BATCHES одночасно) замість послідовного циклу.
     Порядок результатів у підсумковому списку не важливий - виклик
     show_result() у main.py все одно сортує results за timestamp_sec.
+
+    progress_callback(done, total), якщо переданий, викликається ПІСЛЯ
+    кожної завершеної пачки (done - скільки з total пачок вже готово) -
+    цим main.py оновлює прогрес-бар аналізу. Викликається з фонового
+    потоку, тож сам callback має бути потокобезпечним (у main.py це
+    просто Clock.schedule_once).
     """
     api_key = _get_api_key()
 
@@ -207,6 +215,8 @@ def find_object_in_frames(frames, user_prompt, model_name=DEFAULT_MODEL_NAME, la
 
     all_matches = []
     worker_count = min(MAX_PARALLEL_BATCHES, len(batches))
+    total_batches = len(batches)
+    done_batches = 0
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = {
@@ -218,6 +228,9 @@ def find_object_in_frames(frames, user_prompt, model_name=DEFAULT_MODEL_NAME, la
             # перекине виняток нагору, у _run_pipeline (main.py), де
             # він і так уже оброблюється єдиним except-блоком.
             all_matches.extend(future.result())
+            done_batches += 1
+            if progress_callback is not None:
+                progress_callback(done_batches, total_batches)
 
     return all_matches
 
