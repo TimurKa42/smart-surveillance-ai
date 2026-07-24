@@ -420,7 +420,7 @@
         TextInput:
             id: prompt_input
             size_hint_y: None
-            height: dp(38) if app.is_landscape else dp(64)
+            height: dp(64)
             background_color: app.palette["surface"]
             foreground_color: app.palette["text"]
             cursor_color: app.palette["text"]
@@ -431,7 +431,7 @@
             id: start_btn
             text: app.language and app.t("start_analysis")
             size_hint_y: None
-            height: dp(44) if app.is_landscape else dp(48)
+            height: dp(48)
             on_release: root.start_analysis()
 
         BoxLayout:
@@ -474,7 +474,7 @@
             orientation: "horizontal"
 
             ScrollView:
-                size_hint_x: 0.38 if not app.is_landscape else 0.28
+                size_hint_x: 0.38
                 do_scroll_x: False
                 BoxLayout:
                     id: report_list
@@ -929,11 +929,26 @@
             opacity: 1 if app.vibration_enabled else 0.4
             SubtleLabel:
                 text: "Сила вібрації" if app.language == 'ua' else "Vibration strength"
-            Slider:
-                min: 0.15
-                max: 1.0
-                value: app.vibration_strength
-                on_value: app.save_vibration(self.value); root.test_vibrate(self, self.value)
+            FloatLayout:
+                size_hint_y: None
+                height: dp(30)
+                canvas.before:
+                    Color:
+                        rgba: app.palette["text_muted"]
+                    Line:
+                        points: [self.x + dp(16), self.center_y, self.right - dp(16), self.center_y]
+                        width: dp(1.2)
+                Slider:
+                    pos_hint: {"center_y": 0.5}
+                    size_hint_y: None
+                    height: dp(30)
+                    min: 0.15
+                    max: 1.0
+                    value: app.vibration_strength
+                    value_track: True
+                    value_track_color: app.palette["accent"]
+                    value_track_width: dp(2.5)
+                    on_value: app.save_vibration(self.value); root.test_vibrate(self, self.value)
 
         AccentButton:
             text: "Переглянути кадри" if app.language == 'ua' else "View screenshots"
@@ -943,7 +958,15 @@
 
         GhostButton:
             text: "Скинути API Ключ" if app.language == 'ua' else "Reset API Key"
-            color: 1, 1, 1, 1
+            # Колір навмисно записаний через тернарник, що звертається до
+            # app.palette, а НЕ як гола статика (1, 1, 1, 1). Причина така
+            # сама, що й у MenuButton (див. коментар вище): базове правило
+            # GhostButton "color: app.palette['text_muted']" прив'язане до
+            # app.palette і перевиконується при кожній зміні теми,
+            # затираючи статичне значення інстансу, яке саме по собі ні до
+            # чого не прив'язане й тому не переисполняється у відповідь.
+            # Через це текст "сірів" рівно в момент перемикання теми.
+            color: (1, 1, 1, 1) if True else app.palette["text_muted"]
             bold: True
             accent_color: app.palette["danger"]
             size_hint_y: None
