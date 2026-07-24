@@ -123,7 +123,24 @@ class MissingApiKeyError(Exception):
 
 
 class GeminiApiError(Exception):
-    """Кидається, якщо Gemini API повернув помилку (неправильний ключ, ліміти тощо)."""
+    """
+    Кидається, якщо Gemini API повернув помилку (неправильний ключ, ліміти
+    тощо), АБО якщо запит взагалі не дійшов до сервера (нема інтернету,
+    таймаут).
+
+    kind - короткий машинний код причини, яким UI (main.py) вибирає
+    зрозумілий людині текст замість сирого технічного повідомлення:
+    - "network"      - нема з'єднання з інтернетом.
+    - "timeout"      - сервер не відповів вчасно.
+    - "rate_limit"   - 429, перевищено ліміт запитів.
+    - "invalid_key"  - 401/403, ключ не підходить.
+    - "server"       - 5xx, тимчасова проблема на боці Gemini.
+    - "unknown"      - усе інше (напр. неочікувана структура відповіді).
+    """
+
+    def __init__(self, message, kind="unknown"):
+        super().__init__(message)
+        self.kind = kind
 
 
 def check_api_key(api_key):
@@ -239,24 +256,47 @@ def _analyze_batch(api_key, batch, index_offset, user_prompt, model_name, langua
     }
 
     url = API_URL_TEMPLATE.format(model=model_name)
-    response = requests.post(
-        url,
-        params={"key": api_key},
-        json=payload,
-        timeout=REQUEST_TIMEOUT_SEC,
-    )
+
+    try:
+        response = requests.post(
+            url,
+            params={"key": api_key},
+            json=payload,
+            timeout=REQUEST_TIMEOUT_SEC,
+        )
+    except requests.exceptions.Timeout as error:
+        raise GeminiApiError(f"Timeout: {error}", kind="timeout") from error
+    except requests.exceptions.RequestException as error:
+        # Немає з'єднання, DNS не резолвиться, обрив під час запиту
+        # тощо - усе, що не дійшло до сервера взагалі.
+        raise GeminiApiError(f"Network error: {error}", kind="network") from error
 
     if response.status_code != 200:
-        raise GeminiApiError(f"Gemini API повернув помилку {response.status_code}: {response.text[:300]}")
+        detail = f"Gemini API повернув помилку {response.status_code}: {response.text[:300]}"
+        if response.status_code == 429:
+            kind = "rate_limit"
+        elif response.status_code in (401, 403):
+            kind = "invalid_key"
+        elif response.status_code >= 500:
+            kind = "server"
+        else:
+            kind = "unknown"
+        raise GeminiApiError(detail, kind=kind)
 
     result = response.json()
 
     try:
         text_answer = result["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError):
-        raise GeminiApiError(f"Неочікувана структура відповіді Gemini: {json.dumps(result)[:300]}")
+    except (KeyError, IndexError) as error:
+        raise GeminiApiError(
+            f"Неочікувана структура відповіді Gemini: {json.dumps(result)[:300]}", kind="unknown"
+        ) from error
 
-    data = json.loads(text_answer)
+    try:
+        data = json.loads(text_answer)
+    except json.JSONDecodeError as error:
+        raise GeminiApiError(f"Gemini повернув невалідний JSON: {text_answer[:300]}", kind="unknown") from error
+
     return [
         Match(
             frame_number=int(item["frame_number"]),
