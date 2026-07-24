@@ -12,7 +12,7 @@ version = 1.0
 # python-for-android (важкий пакет, перша збірка триватиме довго).
 requirements = python3,hostpython3,kivy,numpy==v2.0.2,opencv,pillow,requests,python-dotenv,plyer,pyjnius
 
-orientation = all
+orientation = portrait
 fullscreen = 0
 
 icon.filename = %(source.dir)s/icon.png
