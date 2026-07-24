@@ -538,11 +538,9 @@ class SettingsModal(ModalView):
         app.root.current = "setup"
 
     def open_history(self):
-        self.dismiss()
         HistoryModal().open()
 
     def open_about(self):
-        self.dismiss()
         AboutModal().open()
 
     def test_vibrate(self, instance, value):
@@ -1120,6 +1118,7 @@ class MainScreen(Screen):
         """
         app = App.get_running_app()
         self.ids.choose_gallery_btn.disabled = True
+        self.ids.status_label.text = ""
         setattr(self, active_btn_property, app.t("loading_video"))
 
     def _on_video_selected(self, path):
@@ -1215,6 +1214,12 @@ class MainScreen(Screen):
 
         self.ids.start_btn.disabled = True
         self.ids.status_label.text = app.t("status_cutting_frames")
+
+        # Стираємо старий звіт одразу, а не чекаємо готовності нового -
+        # інакше на екрані лишаються результати ПОПЕРЕДНЬОГО відео, і
+        # користувач може сплутати їх зі свіжими, поки йде аналіз.
+        self.results = []
+        self.ids.report_list.clear_widgets()
 
         generation = self._analysis_generation
         thread = threading.Thread(
@@ -1323,6 +1328,15 @@ class MainScreen(Screen):
         except gemini_tools.MissingApiKeyError:
             error_text = app.t("status_error", error="no API key")
             Clock.schedule_once(lambda dt: self._on_pipeline_error(error_text, generation))
+        except gemini_tools.GeminiApiError as error:
+            # Замість сирого технічного тексту помилки - зрозуміла
+            # людині фраза, підібрана за error.kind. Ключ локалізації
+            # "error_<kind>" має існувати для кожного kind з
+            # gemini_tools.GeminiApiError (network/timeout/rate_limit/
+            # invalid_key/server/unknown) - їх треба додати в
+            # localization.py.
+            error_text = app.t(f"error_{error.kind}")
+            Clock.schedule_once(lambda dt: self._on_pipeline_error(error_text, generation))
         except Exception as error:
             # ВАЖЛИВО: app.t(...) з error треба викликати ТУТ, поки
             # змінна error ще існує. Python автоматично видаляє змінну
@@ -1411,9 +1425,6 @@ class SmartSurveillanceApp(App):
     vibration_strength = NumericProperty(0.6)
     vibration_enabled = BooleanProperty(True)
 
-    is_landscape = BooleanProperty(False)
-    window_width = NumericProperty(360)
-
     safe_top = NumericProperty(0)
     safe_bottom = NumericProperty(0)
     safe_left = NumericProperty(0)
@@ -1487,9 +1498,6 @@ class SmartSurveillanceApp(App):
         return self.loc.t(key, **kwargs)
 
     def _on_window_size(self, window, size):
-        width, height = size
-        self.window_width = width
-        self.is_landscape = width > height
         self._update_safe_insets()
 
     def _update_safe_insets(self, *args):
