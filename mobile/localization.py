@@ -67,6 +67,7 @@ TEXTS = {
         "error_rate_limit": "Забагато запитів. Зачекай трохи і спробуй ще раз",
         "error_invalid_key": "Проблема з API-ключем. Перевір його в налаштуваннях",
         "error_server": "Сервіс Gemini тимчасово недоступний. Спробуй пізніше",
+        "error_blocked": "Gemini відмовився аналізувати ці кадри (спрацював фільтр безпеки). Спробуй інший запит або відео",
         "error_unknown": "Щось пішло не так. Спробуй ще раз",
 
         # ---- історія кадрів (HistoryModal) ----
@@ -146,6 +147,7 @@ TEXTS = {
         "error_rate_limit": "Too many requests. Wait a bit and try again",
         "error_invalid_key": "There's a problem with your API key. Check it in settings",
         "error_server": "Gemini is temporarily unavailable. Please try again later",
+        "error_blocked": "Gemini declined to analyze these frames (a safety filter was triggered). Try a different prompt or video",
         "error_unknown": "Something went wrong. Please try again",
 
         # ---- frame history (HistoryModal) ----
