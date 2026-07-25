@@ -22,8 +22,9 @@ Python, без скомпільованих залежностей) напрям
 """
 import base64
 import json
+import time
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -45,6 +46,31 @@ DEFAULT_PROMPT_LANGUAGE = "ua"
 
 API_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 REQUEST_TIMEOUT_SEC = 120
+
+# Скільки РАЗІВ ДОДАТКОВО пробуємо один і той самий батч, якщо він
+# впав з ТИМЧАСОВОЮ помилкою (див. RETRYABLE_ERROR_KINDS нижче), перш
+# ніж здатись і показати помилку користувачу. 3 додаткових спроби
+# (тобто до 4 разів сумарно) - розумний баланс: досить, щоб пережити
+# короткий "гикання" мережі чи миттєвий сплеск 429 від Gemini, і не
+# настільки багато, щоб користувач сидів і чекав хвилинами на явно
+# зламаний запит.
+MAX_RETRIES = 3
+
+# Базова пауза перед повтором (секунди). Кожна наступна спроба чекає
+# вдвічі довше за попередню (класичний exponential backoff:
+# 1.5s -> 3s -> 6s) - це дає серверу Gemini час "оговтатись" від
+# перевантаження (429) чи тимчасового збою (5xx), замість того, щоб
+# одразу бомбардувати його новим запитом.
+RETRY_BACKOFF_BASE_SEC = 1.5
+
+# Які "види" помилок ІМЕЄ СЕНС повторювати. "rate_limit" (429) і
+# "server" (5xx) - явно тимчасові, сервер сам підказує "спробуй
+# пізніше". "timeout" і "network" теж часто минущі (нестабільний
+# мобільний інтернет, короткий обрив). А ось "invalid_key" (ключ
+# точно поганий) чи "unknown" (щось структурно не так у відповіді)
+# повторювати немає сенсу - результат буде той самий, лише даремно
+# витратимо час користувача.
+RETRYABLE_ERROR_KINDS = {"rate_limit", "server", "timeout", "network"}
 
 
 @dataclass
@@ -135,6 +161,9 @@ class GeminiApiError(Exception):
     - "rate_limit"   - 429, перевищено ліміт запитів.
     - "invalid_key"  - 401/403, ключ не підходить.
     - "server"       - 5xx, тимчасова проблема на боці Gemini.
+    - "blocked"      - Gemini відповів 200 OK, але без жодного
+                       результату (найчастіше - спрацював safety-
+                       фільтр і запит/кадри заблоковано).
     - "unknown"      - усе інше (напр. неочікувана структура відповіді).
     """
 
@@ -189,7 +218,8 @@ def _get_api_key():
 
 
 def find_object_in_frames(
-    frames, user_prompt, model_name=DEFAULT_MODEL_NAME, language=DEFAULT_PROMPT_LANGUAGE, progress_callback=None
+    frames, user_prompt, model_name=DEFAULT_MODEL_NAME, language=DEFAULT_PROMPT_LANGUAGE,
+    progress_callback=None, is_cancelled=None,
 ):
     """
     Розбиває кадри на пачки по BATCH_SIZE і аналізує їх ПАРАЛЕЛЬНО
@@ -202,6 +232,17 @@ def find_object_in_frames(
     цим main.py оновлює прогрес-бар аналізу. Викликається з фонового
     потоку, тож сам callback має бути потокобезпечним (у main.py це
     просто Clock.schedule_once).
+
+    is_cancelled, якщо переданий, - функція БЕЗ аргументів, що повертає
+    True, коли аналіз потрібно перервати (наприклад, користувач
+    натиснув "Очистити все" або запустив новий аналіз, поки цей ще
+    йшов). ВАЖЛИВО: реально зупинити вже запущений HTTP-запит
+    неможливо (потік просто чекає відповідь сервера) - але можна
+    скасувати ті батчі, які ще НЕ встигли стартувати і просто стоять у
+    черзі ThreadPoolExecutor (бо одночасно виконується не більше
+    MAX_PARALLEL_BATCHES). Для довгого відео з багатьма батчами це
+    реально економить час, трафік і квоту API на запити, результат
+    яких все одно буде проігноровано.
     """
     api_key = _get_api_key()
 
@@ -224,10 +265,23 @@ def find_object_in_frames(
             for offset, batch in batches
         }
         for future in as_completed(futures):
-            # Якщо хоч одна пачка впала з помилкою - result() тут же
-            # перекине виняток нагору, у _run_pipeline (main.py), де
-            # він і так уже оброблюється єдиним except-блоком.
-            all_matches.extend(future.result())
+            if is_cancelled is not None and is_cancelled():
+                # Скасовуємо всі батчі, які ще не встигли стартувати -
+                # ті, що вже виконуються (max MAX_PARALLEL_BATCHES штук),
+                # усе одно доведеться дочекатись при виході з `with`
+                # (ThreadPoolExecutor чекає завершення активних потоків),
+                # але їхній результат нижче просто ігнорується.
+                for pending_future in futures:
+                    pending_future.cancel()
+                break
+
+            try:
+                all_matches.extend(future.result())
+            except CancelledError:
+                # Сам future був скасований (не встиг стартувати) -
+                # це очікувано після is_cancelled() вище, просто йдемо
+                # до наступного.
+                continue
             done_batches += 1
             if progress_callback is not None:
                 progress_callback(done_batches, total_batches)
@@ -242,6 +296,13 @@ def _analyze_batch(api_key, batch, index_offset, user_prompt, model_name, langua
     index_offset потрібен, щоб frame_number у відповіді вказував на
     справжній номер кадру в загальному списку (а не на позицію 0..39
     всередині конкретної пачки).
+
+    Якщо запит впаде з ТИМЧАСОВОЮ помилкою (rate_limit/server/timeout/
+    network - див. RETRYABLE_ERROR_KINDS) - повторює його ще до
+    MAX_RETRIES разів із зростаючою паузою (exponential backoff),
+    перш ніж остаточно здатись і перекинути помилку нагору. Помилки,
+    повторення яких свідомо безглузде (поганий ключ, дивна структура
+    відповіді), одразу летять нагору без жодних спроб.
     """
     system_prompt = SYSTEM_PROMPTS.get(language, SYSTEM_PROMPTS[DEFAULT_PROMPT_LANGUAGE])
 
@@ -270,6 +331,35 @@ def _analyze_batch(api_key, batch, index_offset, user_prompt, model_name, langua
 
     url = API_URL_TEMPLATE.format(model=model_name)
 
+    last_error = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            return _send_batch_request(url, api_key, payload)
+        except GeminiApiError as error:
+            last_error = error
+            is_last_attempt = attempt == MAX_RETRIES
+            if error.kind not in RETRYABLE_ERROR_KINDS or is_last_attempt:
+                raise
+            # Пауза перед повтором росте вдвічі щоразу: 1.5s, 3s, 6s.
+            # Викликається з робочого потоку ThreadPoolExecutor - тому
+            # звичайний time.sleep() тут абсолютно безпечний, він не
+            # блокує ні головний потік Kivy, ні інші батчі (кожен
+            # виконується у своєму власному потоці).
+            time.sleep(RETRY_BACKOFF_BASE_SEC * (2 ** attempt))
+
+    # Сюди дійти неможливо (цикл або повертає результат, або кидає
+    # виняток на останній спробі) - але про всяк випадок, щоб лінтер
+    # і читач коду не питали "а що як last_error лишиться None".
+    raise last_error
+
+
+def _send_batch_request(url, api_key, payload):
+    """
+    Один "сирий" HTTP-виклик до Gemini + розбір відповіді. Винесено з
+    _analyze_batch окремою функцією, щоб retry-цикл там міг просто
+    викликати це знову при тимчасовій помилці, не дублюючи розбір
+    payload щоразу.
+    """
     try:
         response = requests.post(
             url,
@@ -298,8 +388,27 @@ def _analyze_batch(api_key, batch, index_offset, user_prompt, model_name, langua
 
     result = response.json()
 
+    # Gemini іноді відповідає 200 OK, але БЕЗ жодного результату - типово
+    # це safety-фільтр, який заблокував або сам запит (promptFeedback.
+    # blockReason на верхньому рівні відповіді), або конкретну відповідь
+    # (порожній список candidates). Раніше це не перевірялось окремо і
+    # падало нижче в except (KeyError, IndexError) з kind="unknown" -
+    # користувач бачив загальне "Щось пішло не так" замість зрозумілого
+    # "Gemini відмовився аналізувати ці кадри".
+    block_reason = result.get("promptFeedback", {}).get("blockReason")
+    if block_reason:
+        raise GeminiApiError(
+            f"Gemini заблокував запит: {block_reason}", kind="blocked"
+        )
+
+    candidates = result.get("candidates") or []
+    if not candidates:
+        raise GeminiApiError(
+            f"Gemini не повернув жодної відповіді: {json.dumps(result)[:300]}", kind="blocked"
+        )
+
     try:
-        text_answer = result["candidates"][0]["content"]["parts"][0]["text"]
+        text_answer = candidates[0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError) as error:
         raise GeminiApiError(
             f"Неочікувана структура відповіді Gemini: {json.dumps(result)[:300]}", kind="unknown"
