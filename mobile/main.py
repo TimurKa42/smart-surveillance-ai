@@ -1337,8 +1337,15 @@ class MainScreen(Screen):
         # Стираємо старий звіт одразу, а не чекаємо готовності нового -
         # інакше на екрані лишаються результати ПОПЕРЕДНЬОГО відео, і
         # користувач може сплутати їх зі свіжими, поки йде аналіз.
+        # Важливо чистити ПОВНІСТЮ: і список звіту, і фото/опис праворуч,
+        # інакше старий скріншот і текст висять на екрані аж до появи
+        # нових результатів (а при помилці аналізу - взагалі назавжди).
         self.results = []
+        self.current_screenshot_index = None
         self.ids.report_list.clear_widgets()
+        self.ids.description_label.text = ""
+        self.ids.screenshot_image.source = ""
+        self.ids.screenshot_image.opacity = 0
 
         generation = self._analysis_generation
         thread = threading.Thread(
