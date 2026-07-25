@@ -1,4 +1,4 @@
-#:kivy 2.3.0
+ #:kivy 2.3.0
 #:import animate_press main.animate_press
 #:import animate_release main.animate_release
 #:import haptic_feedback main.haptic_feedback
@@ -34,6 +34,41 @@
             pos: self.pos
             size: [max(self.height, self.width * min(max(self.progress, 0), 100) / 100.0), self.height]
             radius: [self.height / 2]
+
+<VibrationSlider>:
+    size_hint_y: None
+    height: dp(30)
+    canvas:
+        # Сіра доріжка - по всій ширині, за винятком відступів під
+        # радіус кружка з обох боків (інакше кружок на краях "вилазив"
+        # би за межі доріжки).
+        Color:
+            rgba: app.palette["text_muted"]
+        RoundedRectangle:
+            pos: (self.x + self.thumb_radius, self.center_y - self.track_height / 2)
+            size: (max(self.width - 2 * self.thumb_radius, 0), self.track_height)
+            radius: [self.track_height / 2]
+        # Синя заливка зліва від кружка - показує "пройдену" частину.
+        Color:
+            rgba: app.palette["accent"]
+        RoundedRectangle:
+            pos: (self.x + self.thumb_radius, self.center_y - self.track_height / 2)
+            size: (max(self.thumb_x - (self.x + self.thumb_radius), 0), self.track_height)
+            radius: [self.track_height / 2]
+        # Сам кружок: заливка кольором поверхні (не білим напряму) -
+        # тому в темній темі кружок темний з синім обідком, а в
+        # світлій - білий з синім обідком; в обох випадках контрастує
+        # і з доріжкою, і з фоном.
+        Color:
+            rgba: app.palette["surface"]
+        Ellipse:
+            pos: (self.thumb_x - self.thumb_radius, self.center_y - self.thumb_radius)
+            size: (self.thumb_radius * 2, self.thumb_radius * 2)
+        Color:
+            rgba: app.palette["accent"]
+        Line:
+            circle: (self.thumb_x, self.center_y, self.thumb_radius - dp(1))
+            width: dp(1.8)
 
 <AccentButton@Button>:
     scale: 1.0
@@ -212,7 +247,11 @@
             x: self.scale
             y: self.scale
         Color:
-            rgba: app.palette["danger"]
+            # Був app.palette["danger"] (червоний) - зайве привертав
+            # увагу, наче попередження/помилка, хоча це звичайна
+            # кнопка довідки. Сірий text_muted - вже адаптований під
+            # обидві теми (контрастний і на темному, і на білому фоні).
+            rgba: app.palette["text_muted"]
         Line:
             circle: (self.center_x, self.center_y, self.width / 2 - dp(1.5))
             width: dp(1.6)
@@ -498,14 +537,22 @@
 
             ProgressPill:
                 id: analysis_progress_pill
-                progress: root.analysis_progress
+                # displayed_progress (а не analysis_progress напряму) -
+                # це те саме значення, яке плавно анімується в
+                # main.py:on_analysis_progress, тому смужка "перетікає"
+                # між чекпоінтами, а не стрибає.
+                progress: root.displayed_progress
                 size_hint_x: None
                 width: dp(64) if root.analysis_progress > 0 else 0
                 opacity: 1 if root.analysis_progress > 0 else 0
 
             SubtleLabel:
                 id: analysis_progress_percent
-                text: f"{int(root.analysis_progress)}%" if root.analysis_progress > 0 else ""
+                # round(), а не int() - зі int() число "застигає" на
+                # 0.9 секунди довше на кожному цілому відсотку під час
+                # плавної анімації (обрізає дробову частину вниз),
+                # round() рівномірніше йде по цифрах 0..100.
+                text: f"{round(root.displayed_progress)}%" if root.analysis_progress > 0 else ""
                 bold: True
                 color: app.palette["text"]
                 font_size: "11sp"
@@ -631,7 +678,11 @@
         is_selected: root.is_selected
         opacity: 1 if root.selection_mode else 0
         size_hint_x: None
-        width: dp(30) if root.selection_mode else 0
+        # Було dp(30) - через це квадратик у рядку виходив 30x26
+        # (ширший за 26x26 в базовому правилі SelectCheckboxIndicator),
+        # тому й відрізнявся від чекбокса біля "все" в шапці. dp(26)
+        # повертає той самий квадратний розмір, що й скрізь інде.
+        width: dp(26) if root.selection_mode else 0
         # Індикатор тепер сам ButtonBehavior (треба для кліку по
         # квадратику "Всі" в шапці) - тому в межах рядка він би
         # перехоплював дотик на собі і "з'їдав" тап, не даючи ряду
@@ -974,26 +1025,11 @@
             opacity: 1 if app.vibration_enabled else 0.4
             SubtleLabel:
                 text: "Сила вібрації" if app.language == 'ua' else "Vibration strength"
-            FloatLayout:
-                size_hint_y: None
-                height: dp(30)
-                canvas.before:
-                    Color:
-                        rgba: app.palette["text_muted"]
-                    Line:
-                        points: [self.x + dp(16), self.center_y, self.right - dp(16), self.center_y]
-                        width: dp(1.2)
-                Slider:
-                    pos_hint: {"center_y": 0.5}
-                    size_hint_y: None
-                    height: dp(30)
-                    min: 0.15
-                    max: 1.0
-                    value: app.vibration_strength
-                    value_track: True
-                    value_track_color: app.palette["accent"]
-                    value_track_width: dp(2.5)
-                    on_value: app.save_vibration(self.value); root.test_vibrate(self, self.value)
+            VibrationSlider:
+                min: 0.15
+                max: 1.0
+                value: app.vibration_strength
+                on_value: app.save_vibration(self.value); root.test_vibrate(self, self.value)
 
         AccentButton:
             text: "Переглянути кадри" if app.language == 'ua' else "View screenshots"
