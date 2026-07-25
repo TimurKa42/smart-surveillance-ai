@@ -495,6 +495,93 @@ class ConfirmModal(ModalView):
             callback()
 
 
+class VibrationSlider(Widget):
+    """
+    Кастомний повзунок сили вібрації - замінює стандартний Kivy Slider.
+
+    ПРИЧИНА: у стандартного Slider трек і кружок малюються вбудованими
+    текстурами з атласу Kivy (заточені під дефолтну тему движка) - їх
+    не можна перефарбувати під нашу палітру. Через це раніше кружок і
+    "заповнена" частина зліва від нього не мали синього кольору
+    акценту, доріжка не була по центру контейнера (бо в текстур свій
+    внутрішній відступ під кружок, який не збігається з відступами
+    ручного Line, намальованого поруч), а в світлій темі все це просто
+    губилось на білому фоні.
+
+    Тут усе намальовано самостійно на canvas (сіра доріжка, синя
+    заливка зліва від кружка, сам кружок) - тому виглядає однаково
+    акуратно в обох темах і завжди по центру контейнера.
+    """
+    min = NumericProperty(0.0)
+    max = NumericProperty(1.0)
+    value = NumericProperty(0.0)
+    thumb_radius = NumericProperty(dp(11))
+    track_height = NumericProperty(dp(4))
+
+    # Координата X центру кружка - рахується в _update_thumb_x() і
+    # використовується напряму в .kv для малювання доріжки/заливки/
+    # кружка. Окрема властивість (а не виклик методу з .kv) потрібна,
+    # щоб Kivy правильно "підписався" на перемальовку при зміні pos/
+    # size/value - виклик методу всередині kv-виразу такого автозв'язку
+    # не дає.
+    thumb_x = NumericProperty(0.0)
+
+    def __init__(self, **kwargs):
+        self.register_event_type("on_value")
+        super().__init__(**kwargs)
+        self.bind(
+            pos=self._update_thumb_x,
+            size=self._update_thumb_x,
+            value=self._update_thumb_x,
+            min=self._update_thumb_x,
+            max=self._update_thumb_x,
+            thumb_radius=self._update_thumb_x,
+        )
+        self._update_thumb_x()
+
+    def _update_thumb_x(self, *args):
+        span = self.max - self.min
+        fraction = 0 if span == 0 else (self.value - self.min) / span
+        fraction = min(max(fraction, 0), 1)
+        usable_width = max(self.width - 2 * self.thumb_radius, 0)
+        self.thumb_x = self.x + self.thumb_radius + fraction * usable_width
+
+    def _value_from_touch_x(self, x):
+        usable_width = self.width - 2 * self.thumb_radius
+        if usable_width <= 0:
+            return self.min
+        fraction = (x - self.x - self.thumb_radius) / usable_width
+        fraction = min(max(fraction, 0), 1)
+        return self.min + fraction * (self.max - self.min)
+
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return False
+        touch.grab(self)
+        self.value = self._value_from_touch_x(touch.x)
+        self.dispatch("on_value", self.value)
+        return True
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is not self:
+            return False
+        self.value = self._value_from_touch_x(touch.x)
+        self.dispatch("on_value", self.value)
+        return True
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is not self:
+            return False
+        touch.ungrab(self)
+        return True
+
+    def on_value(self, *args):
+        # Порожній обробник за замовчуванням - реальна логіка
+        # (збереження + тестова вібрація) підвішується з .kv через
+        # on_value: у місці використання віджета.
+        pass
+
+
 class SettingsModal(ModalView):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -1071,10 +1158,17 @@ class InfoButton(Button):
 class MainScreen(Screen):
     gallery_btn_text = StringProperty("")
 
-    # 0..100. Керує видимістю й заповненням прогрес-піла поруч зі
-    # статус-лейблом. 0 (за замовчуванням) означає "аналіз не йде" -
-    # піл прихований, а не просто показує порожню смужку.
+    # 0..100. "Цільове" значення прогресу - виставляється миттєво в
+    # ключових точках пайплайна (нарізка кадрів, відповіді Gemini,
+    # збереження скріншотів). Само по собі НЕ відображається напряму -
+    # дивись displayed_progress нижче.
     analysis_progress = NumericProperty(0)
+
+    # Те, що РЕАЛЬНО показує прогрес-піл і текст відсотків. Плавно
+    # "доганяє" analysis_progress через Animation (on_analysis_progress
+    # нижче) замість миттєвого стрибка - тому й зелена смужка, і цифри
+    # перетікають одне в одне, а не "телепортуються" по чекпоінтах.
+    displayed_progress = NumericProperty(0)
 
     # Лічильник "поколінь" аналізу. Кожен запуск start_analysis()
     # збільшує його на 1 і "запам'ятовує" своє число. Фоновий потік
@@ -1086,6 +1180,24 @@ class MainScreen(Screen):
     # ігноруються - ні статус, ні звіт не показуються. Для користувача
     # це виглядає як повноцінне скасування.
     _analysis_generation = 0
+
+    def on_analysis_progress(self, instance, value):
+        """
+        Викликається автоматично Kivy щоразу, коли змінюється
+        analysis_progress (це звичайний механізм властивостей - метод
+        on_<ім'я> реагує на будь-яку зміну). Замість миттєвого стрибка
+        плавно анімуємо displayed_progress до нового значення.
+
+        Скидання в 0 (скасування аналізу, помилка, "Очистити все") -
+        єдиний виняток: тут піл має ховатись одразу, а не повільно
+        "здувати" зелену смужку назад - інакше виглядає як помилка
+        анімації, а не як навмисне приховування.
+        """
+        Animation.cancel_all(self, "displayed_progress")
+        if value <= 0:
+            self.displayed_progress = 0
+            return
+        Animation(displayed_progress=value, duration=0.45, t="out_quad").start(self)
 
     def on_pre_enter(self, *args):
         self.video_path = None
@@ -1220,7 +1332,7 @@ class MainScreen(Screen):
 
         self.ids.start_btn.disabled = True
         self.ids.status_label.text = app.t("status_cutting_frames")
-        self.analysis_progress = 3
+        self.analysis_progress = 5
 
         # Стираємо старий звіт одразу, а не чекаємо готовності нового -
         # інакше на екрані лишаються результати ПОПЕРЕДНЬОГО відео, і
@@ -1262,10 +1374,10 @@ class MainScreen(Screen):
         # gemini_tools) - тому й тут одразу йдемо через
         # Clock.schedule_once, а не чіпаємо Kivy-властивість напряму.
         # Це найдовший етап пайплайна, тож віддаємо йому найбільший
-        # діапазон прогресу: 15% (кадри вже нарізані) .. 80%
+        # діапазон прогресу: 20% (кадри вже нарізані) .. 90%
         # (усі пачки Gemini відповіли, лишається зберегти скріншоти).
         fraction = done / total if total else 1
-        self._set_progress_async(15 + fraction * 65, generation)
+        self._set_progress_async(20 + fraction * 70, generation)
 
     def _run_pipeline(self, prompt_text, model_name, language, generation):
         app = App.get_running_app()
@@ -1274,23 +1386,30 @@ class MainScreen(Screen):
             if self._is_cancelled(generation):
                 return
             self._set_status_async("status_frames_cut", generation, count=len(frames))
-            self._set_progress_async(15, generation)
+            self._set_progress_async(20, generation)
 
             # find_object_in_frames тепер аналізує пачки кадрів
             # ПАРАЛЕЛЬНО (до 4 одночасно) замість послідовного циклу -
             # це основне прискорення для відео з великою кількістю
             # кадрів (кілька пачок по BATCH_SIZE=40).
+            #
+            # is_cancelled: якщо користувач натисне "Очистити все" (або
+            # запустить новий аналіз) просто в момент, коли ця пачка
+            # ще йде - усі батчі, які ще не встигли стартувати, будуть
+            # скасовані замість того, щоб даремно з'їсти час і квоту
+            # API на результат, який все одно ніхто не побачить.
             matches = gemini_tools.find_object_in_frames(
                 frames,
                 prompt_text,
                 model_name=model_name,
                 language=language,
                 progress_callback=lambda done, total: self._on_gemini_batch_progress(done, total, generation),
+                is_cancelled=lambda: self._is_cancelled(generation),
             )
             if self._is_cancelled(generation):
                 return
             self._set_status_async("status_moments_found", generation, count=len(matches))
-            self._set_progress_async(82, generation)
+            self._set_progress_async(90, generation)
 
             screenshots_dir = get_screenshots_dir(app)
 
@@ -1352,7 +1471,7 @@ class MainScreen(Screen):
 
             if self._is_cancelled(generation):
                 return
-            self._set_progress_async(96, generation)
+            self._set_progress_async(97, generation)
 
             results.sort(key=lambda r: r["timestamp_sec"])
             Clock.schedule_once(lambda dt: self._show_results(results, prompt_text, generation))
