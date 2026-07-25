@@ -2,12 +2,6 @@ import struct
 
 import cv2
 
-# Числові ID властивостей OpenCV, які з'явились у 4.5 (CAP_PROP_ORIENTATION_META
-# і CAP_PROP_ORIENTATION_AUTO). Дістаємо через getattr із запасним значенням,
-# бо в збірці для Android може стояти дещо старіша версія OpenCV, де цих
-# констант ще нема серед іменованих атрибутів, хоча самі числові ID стабільні.
-_CAP_PROP_ORIENTATION_META = getattr(cv2, "CAP_PROP_ORIENTATION_META", 48)
-
 
 # ---------------------------------------------------------------------------
 # Читання кута повороту напряму з MP4-файлу (без OpenCV)
@@ -130,7 +124,12 @@ def _read_tkhd_fields(file, data_start, data_size):
     """
     Читає з одного tkhd-боксу дві речі:
       1) width, height - потрібні лише щоб зрозуміти, чи це відео-трек
-         (у аудіо-треку тут завжди 0x0)
+         (у аудіо-треку тут завжди 0x0). УВАГА: це fixed-point 16.16,
+         так само як і матриця нижче (реальне значення в 65536 разів
+         менше за те, що повертає ця функція) - але оскільки нам
+         важлива лише перевірка "!= 0", а не саме число, ділити на
+         0x10000 тут навмисно не стали. Якщо колись знадобляться
+         справжні width/height у пікселях - не забудь про це ділення.
       2) матрицю (a, b, c, d) - з неї рахуємо кут повороту
 
     Повертає (width, height, a, b, c, d) або None, якщо бокс закороткий/биний.
@@ -238,7 +237,7 @@ def read_rotation_from_mp4(video_path):
         return 0
 
 
-def _prepare_orientation(video, video_path):
+def _prepare_orientation(video_path):
     """
     Телефонні відео майже завжди мають метадані повороту - камеру
     тримали "на боці", а плеєр показує відео вертикально/горизонтально
@@ -256,30 +255,7 @@ def _prepare_orientation(video, video_path):
     (дивись коментар над цією функцією вище) - без участі OpenCV,
     тому працює однаково на будь-якій платформі.
     """
-    angle = read_rotation_from_mp4(video_path)
-
-    # ТИМЧАСОВИЙ DEBUG - видалити після діагностики повороту на Android.
-    # Виводить у logcat кут зі старого (ненадійного) способу поруч з
-    # новим, щоб наочно порівняти їх на реальному пристрої.
-    try:
-        old_meta_angle = int(video.get(_CAP_PROP_ORIENTATION_META)) % 360
-        w = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(
-            f"[ROTATION_DEBUG] frame_w={w} frame_h={h} "
-            f"old_orientation_meta={old_meta_angle} tkhd_angle={angle}"
-        )
-    except Exception as debug_error:
-        print(f"[ROTATION_DEBUG] failed to read debug props: {debug_error}")
-
-    return angle
-
-
-# ТИМЧАСОВИЙ DEBUG-ПЕРЕМИКАЧ - видалити після діагностики повороту.
-# True = застосовувати ручний поворот (як зараз), False = вимкнути його
-# повністю і подивитись, чи ця збірка OpenCV на Android повертає кадри
-# сама. Дозволяє перевірити обидва варіанти без правки коду нижче.
-DEBUG_APPLY_MANUAL_ROTATION = True
+    return read_rotation_from_mp4(video_path)
 
 
 def _apply_manual_rotation(frame, angle):
@@ -291,8 +267,6 @@ def _apply_manual_rotation(frame, angle):
     # (де кут реально 90 або 270, а не 0, як у перекодованих Telegram-
     # відео) вертілось у зворотний бік, що на виході давало помітну
     # різницю в 180° від правильної орієнтації.
-    if not DEBUG_APPLY_MANUAL_ROTATION:
-        return frame
     if angle == 90:
         return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
     if angle == 180:
@@ -462,7 +436,7 @@ def extract_frames(video_path, max_frames=300, min_interval_sec=0.5):
     if not video.isOpened():
         raise ValueError(f"Не вдалось відкрити відео: {video_path}")
 
-    manual_rotation = _prepare_orientation(video, video_path)
+    manual_rotation = _prepare_orientation(video_path)
 
     fps = video.get(cv2.CAP_PROP_FPS) or 25.0
     total_frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -549,7 +523,7 @@ def grab_screenshot(video_path, timestamp_sec, save_path):
     нижче, вона відкриває файл лише ОДИН раз замість N.
     """
     video = cv2.VideoCapture(video_path)
-    manual_rotation = _prepare_orientation(video, video_path)
+    manual_rotation = _prepare_orientation(video_path)
 
     fps = video.get(cv2.CAP_PROP_FPS) or 25.0
     target_frame_index = max(0, int(round(timestamp_sec * fps)))
@@ -591,7 +565,7 @@ def grab_screenshots_batch(video_path, timestamp_and_path_list):
     Повертає set успішно збережених save_path.
     """
     video = cv2.VideoCapture(video_path)
-    manual_rotation = _prepare_orientation(video, video_path)
+    manual_rotation = _prepare_orientation(video_path)
     fps = video.get(cv2.CAP_PROP_FPS) or 25.0
 
     targets = sorted(
