@@ -187,6 +187,4 @@ buildozer android deploy run logcat
 
 ## Ліцензія
 
-© Timur Kalenyk Corporation, 2026. Умови використання/розповсюдження
-не визначені окремим файлом ліцензії — за потреби додай `LICENSE` з
-обраною ліцензією (MIT, Apache-2.0 тощо).
+© Timur Kalenik Corporation, 2026.
