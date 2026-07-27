@@ -234,4 +234,4 @@ Android SDK/NDK між запусками (якщо не налаштовано 
 
 ## Ліцензія
 
-© Timur Kalenyk Corporation, 2026.
+© Timur Kalenik Corporation, 2026.
