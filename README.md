@@ -1,5 +1,9 @@
-[README.md](https://github.com/user-attachments/files/30359467/README.md)
 # Smart Surveillance AI — мобільна версія (Kivy)
+
+![Platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)
+![Kivy](https://img.shields.io/badge/UI-Kivy-black)
+![License](https://img.shields.io/badge/license-see%20below-lightgrey)
 
 Це окремий застосунок від десктопної версії (`../main.py` на
 CustomTkinter). CustomTkinter/Tkinter не працює на Android і не
@@ -7,6 +11,17 @@ CustomTkinter). CustomTkinter/Tkinter не працює на Android і не
 Kivy. Логіка нарізки відео (`video_tools.py`) взята з десктопної
 версії, а звернення до Gemini (`gemini_tools.py`) — переписане з нуля
 під REST API (деталі нижче).
+
+## Зміст
+
+- [Що робить застосунок](#що-робить-застосунок)
+- [Технологічний стек](#технологічний-стек)
+- [Чому REST API замість офіційного google-genai SDK](#чому-rest-api-замість-офіційного-google-genai-sdk)
+- [Чому кадри більше не перевертаються на 90°](#чому-кадри-більше-не-перевертаються-на-90°)
+- [Структура проєкту](#структура-проєкту)
+- [Вимоги](#вимоги)
+- [Як зібрати APK самому](#як-зібрати-apk-самому)
+- [Що варто знати перед захистом проєкту](#що-варто-знати-перед-захистом-проєкту)
 
 ## Що робить застосунок
 
@@ -47,6 +62,15 @@ Gemini API повертає технічну помилку, а `gemini_tools.py
 альбомний режим свідомо вимкнено, бо для утилітарного сценарію
 "вибрав відео → отримав звіт" він не додає користі, а лише подвоює
 обсяг верстки, яку треба підтримувати.
+
+## Технологічний стек
+
+- **UI:** [Kivy](https://kivy.org/) (`.kv`-розмітка в `smartsurveillance.kv`)
+- **Комп'ютерний зір:** OpenCV (нарізка кадрів, детекція руху)
+- **AI-аналіз:** Gemini REST API (`gemini-3.5-flash-lite` / `gemini-3.6-flash`) напряму через `requests`
+- **Мережа/системні виклики на Android:** `pyjnius`, `plyer`
+- **Мінімальна версія Android:** API 24 (Android 7.0), збирається під `arm64-v8a`
+- **Python:** 3.x (сумісний з python-for-android; повний список залежностей — у `requirements` файлу `buildozer.spec`)
 
 ## Чому REST API замість офіційного google-genai SDK
 
@@ -95,6 +119,13 @@ Python, без скомпільованих залежностей) до Gemini 
 і працює лише через **buildozer на Linux** (macOS частково, Windows —
 тільки через WSL). Весь код і конфігурація (`buildozer.spec`) вже
 готові — залишається запустити збірку на своїй машині.
+
+## Вимоги
+
+- Linux (Ubuntu/Debian) або WSL на Windows; на macOS збірка можлива частково.
+- Python 3.10+ та `pip`.
+- Android-телефон з увімкненою "Налагодженням USB" (для тестування на пристрої).
+- Ключ Gemini API — отримати можна на https://aistudio.google.com/apikey.
 
 ## Як зібрати APK самому
 
@@ -150,3 +181,12 @@ buildozer android deploy run logcat
 - API-ключ Gemini зберігається лише локально на пристрої (`.env` у
   теці даних застосунку) і ніколи нікуди не передається, окрім прямих
   запитів до Google Gemini.
+- Мобільна й десктопна версії — окремі кодові бази з різним UI-шаром,
+  але спільною логікою нарізки відео; зміни у форматі кадрів
+  (`video_tools.py`) варто синхронізувати в обох місцях вручну.
+
+## Ліцензія
+
+© Timur Kalenyk Corporation, 2026. Умови використання/розповсюдження
+не визначені окремим файлом ліцензії — за потреби додай `LICENSE` з
+обраною ліцензією (MIT, Apache-2.0 тощо).
