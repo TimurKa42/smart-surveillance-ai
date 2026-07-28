@@ -57,6 +57,9 @@ TEXTS = {
         "lightbox_save": "Зберегти",
         "image_saved": "Збережено в галерею",
         "image_save_failed": "Не вдалось зберегти",
+        "lightbox_pdf": "PDF",
+        "pdf_saved": "PDF збережено",
+        "pdf_save_failed": "Не вдалось зберегти PDF",
 
         # ---- вибір відео ----
         "status_video_open_failed": "Не вдалося відкрити обраний файл. Спробуй ще раз",
@@ -137,6 +140,9 @@ TEXTS = {
         "lightbox_save": "Save",
         "image_saved": "Saved to gallery",
         "image_save_failed": "Failed to save",
+        "lightbox_pdf": "PDF",
+        "pdf_saved": "PDF saved",
+        "pdf_save_failed": "Failed to save PDF",
 
         # ---- video picking ----
         "status_video_open_failed": "Couldn't open the selected file. Please try again",
