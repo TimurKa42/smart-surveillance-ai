@@ -36,6 +36,7 @@ import theme
 from localization import Localization
 from video_tools import extract_frames, grab_screenshots_batch, format_time
 import gemini_tools
+import pdf_export
 
 MAX_WORDS_IN_PROMPT = 200
 MAX_FRAMES = 150
@@ -651,9 +652,18 @@ class AboutModal(ModalView):
 
 
 class LightboxModal(ModalView):
-    def __init__(self, image_path, description="", **kwargs):
+    def __init__(self, image_path, description="", time_str="", video_name="",
+                 frame_index=None, **kwargs):
         super().__init__(**kwargs)
         self.image_path = image_path
+        self.description = description
+        # Метадані кадру - потрібні ЛИШЕ для PDF-звіту (сам скріншот
+        # у галерею їх не несе). time_str навмисно необов'язковий -
+        # лайтбокс і раніше відкривався без нього з деяких місць,
+        # тому просто ховаємо кнопку PDF, якщо часу немає (див. нижче).
+        self.time_str = time_str
+        self.video_name = video_name
+        self.frame_index = frame_index
         self.size_hint = (1, 1)
         self.background_color = (0, 0, 0, 0.9)
 
@@ -690,10 +700,18 @@ class LightboxModal(ModalView):
         # кнопки практично губились. Тепер це один візуально цілісний
         # плаваючий блок, який завжди читається незалежно від того,
         # що під ним на фото.
+        # Кнопка PDF доречна, лише якщо відомий час кадру - без нього
+        # звіт втрачає сенс (порожнє поле "Час у відео"). Тому ширина
+        # капсули рахується динамічно: з кнопкою PDF вона ширша, без
+        # неї - лишається такою ж, як і була раніше.
+        show_pdf_btn = bool(self.time_str)
+        pdf_btn_width = dp(76)
+        bar_width = dp(164) + (pdf_btn_width + dp(6) if show_pdf_btn else 0)
+
         self.top_bar = BoxLayout(
             orientation="horizontal",
             size_hint=(None, None),
-            size=(dp(164), dp(48)),
+            size=(bar_width, dp(48)),
             spacing=dp(6),
             padding=[dp(6), dp(4)],
         )
@@ -710,6 +728,16 @@ class LightboxModal(ModalView):
         )
         save_btn.bind(on_release=self.save_to_gallery)
         self.top_bar.add_widget(save_btn)
+
+        if show_pdf_btn:
+            pdf_btn = GhostButton(
+                text=app.t("lightbox_pdf") if app else "PDF",
+                accent_color=(1, 1, 1, 0.16),
+                size_hint=(None, None),
+                size=(pdf_btn_width, dp(40)),
+            )
+            pdf_btn.bind(on_release=self.export_to_pdf)
+            self.top_bar.add_widget(pdf_btn)
 
         close_btn = CloseButton(size_hint=(None, None), size=(dp(40), dp(40)))
         close_btn.bind(on_release=self.dismiss)
@@ -867,6 +895,90 @@ class LightboxModal(ModalView):
         finally:
             output_stream.close()
 
+    def export_to_pdf(self, *args):
+        app = App.get_running_app()
+        try:
+            # PDF генеруємо у власну теку застосунку (тимчасовий файл),
+            # а вже звідти - копіюємо/реєструємо в системне сховище.
+            # Той самий підхід, що і зі скріншотами: спершу пишемо
+            # туди, куди точно маємо права запису, а вже потім
+            # переносимо в публічне місце.
+            tmp_dir = os.path.join(app.user_data_dir, "pdf_exports")
+            os.makedirs(tmp_dir, exist_ok=True)
+            filename = pdf_export.build_pdf_filename(self.time_str, self.frame_index)
+            tmp_path = os.path.join(tmp_dir, filename)
+
+            pdf_export.export_frame_to_pdf(
+                output_path=tmp_path,
+                image_path=self.image_path,
+                time_str=self.time_str,
+                description=self.description,
+                video_name=self.video_name,
+                frame_index=self.frame_index,
+            )
+
+            if platform == "android":
+                self._save_pdf_android(tmp_path, filename)
+            else:
+                docs_dir = storagepath.get_documents_dir()
+                dest = os.path.join(docs_dir, filename)
+                shutil.copy(tmp_path, dest)
+
+            haptic_feedback()
+            self._show_feedback(app.t("pdf_saved") if app else "PDF saved")
+        except Exception as e:
+            print("Помилка експорту в PDF:", e)
+            self._show_feedback(app.t("pdf_save_failed") if app else "Failed to save PDF")
+
+    def _save_pdf_android(self, tmp_path, filename):
+        """
+        Той самий принцип, що й _save_to_gallery_android, але PDF - не
+        зображення, тому реєструємо його в колекції MediaStore.Downloads
+        (а не Images), з mime-типом application/pdf. Це кладе файл у
+        системну теку "Завантаження/SmartSurveillance", звідки його
+        видно і в застосунку "Файли", і при відкритті через будь-який
+        PDF-рідер.
+        """
+        from jnius import autoclass
+
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        ContentValues = autoclass("android.content.ContentValues")
+        MediaColumns = autoclass("android.provider.MediaStore$MediaColumns")
+        BuildVersion = autoclass("android.os.Build$VERSION")
+
+        activity = PythonActivity.mActivity
+        resolver = activity.getContentResolver()
+
+        values = ContentValues()
+        values.put(MediaColumns.DISPLAY_NAME, filename)
+        values.put(MediaColumns.MIME_TYPE, "application/pdf")
+
+        if BuildVersion.SDK_INT >= 29:
+            MediaStoreDownloads = autoclass("android.provider.MediaStore$Downloads")
+            values.put(MediaColumns.RELATIVE_PATH, "Download/SmartSurveillance")
+            uri = resolver.insert(MediaStoreDownloads.EXTERNAL_CONTENT_URI, values)
+        else:
+            # На старіших Android немає колекції Downloads у MediaStore -
+            # пишемо напряму у публічну теку Завантажень (доступ дає
+            # WRITE_EXTERNAL_STORAGE, який застосунок вже запитує).
+            downloads_dir = storagepath.get_downloads_dir()
+            dest_dir = os.path.join(downloads_dir, "SmartSurveillance")
+            os.makedirs(dest_dir, exist_ok=True)
+            shutil.copy(tmp_path, os.path.join(dest_dir, filename))
+            return
+
+        if uri is None:
+            raise IOError("MediaStore insert повернув null Uri для PDF")
+
+        output_stream = resolver.openOutputStream(uri)
+        try:
+            with open(tmp_path, "rb") as source_file:
+                data = source_file.read()
+            output_stream.write(data)
+            output_stream.flush()
+        finally:
+            output_stream.close()
+
     def _show_feedback(self, text):
         self._feedback_label.text = text
         self._feedback_label.opacity = 1
@@ -961,7 +1073,14 @@ class HistoryModal(ModalView):
         screenshot_path = os.path.join(self.screenshots_dir, record["filename"])
         if not os.path.exists(screenshot_path):
             return
-        LightboxModal(screenshot_path, description=record.get("description", "")).open()
+        timestamp_sec = record.get("timestamp_sec")
+        time_str = format_time(timestamp_sec) if timestamp_sec is not None else ""
+        LightboxModal(
+            screenshot_path,
+            description=record.get("description", ""),
+            time_str=time_str,
+            video_name=record.get("video_name", ""),
+        ).open()
 
     def toggle_select_all(self):
         haptic_feedback()
@@ -1578,7 +1697,23 @@ class MainScreen(Screen):
         Animation(opacity=1, duration=0.18).start(image)
 
     def open_lightbox(self, path):
-        LightboxModal(path).open()
+        # current_screenshot_index виставляється у show_result() при
+        # виборі пункту списку - тож тут завжди відповідає тому кадру,
+        # чий скріншот зараз показаний і по якому клікнули.
+        result = None
+        if self.results and 0 <= (self.current_screenshot_index or 0) < len(self.results):
+            result = self.results[self.current_screenshot_index]
+
+        if result:
+            LightboxModal(
+                path,
+                description=result.get("description", ""),
+                time_str=result.get("time_str", ""),
+                video_name=result.get("video_name", ""),
+                frame_index=self.current_screenshot_index + 1,
+            ).open()
+        else:
+            LightboxModal(path).open()
 
 
 class SmartSurveillanceApp(App):
