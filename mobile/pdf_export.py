@@ -2,25 +2,28 @@
 pdf_export.py
 
 Генерація PDF-звіту по ОДНОМУ знайденому кадру: скріншот, час у
-відео (ЧЧ:ММ:СС), опис від Gemini і, якщо відомий, номер кадру.
+відео (ГГ:ХХ:СС), опис від Gemini і, якщо відомий, номер кадру.
 
 Навмисно окремий модуль (а не метод усередині main.py) - як і
 video_tools.py/gemini_tools.py, це чиста логіка без Kivy-залежностей,
 її легко тестувати і використати повторно (наприклад, пізніше -
 "експортувати всю історію одним PDF").
+
+Примітка: раніше тут використовувався reportlab, але його C-розширення
+(_rl_accel) не компілюється під Android-збіркою на сучасному Python
+(python-for-android тягне Python 3.14, а reportlab.rl_accel лізе у
+внутрішню структуру CPython-кадру, яку прибрали ще в 3.11+). fpdf2 -
+чиста Python-бібліотека без C-коду, тому збирається на Android без
+проблем і дає той самий результат.
 """
 import os
 from datetime import datetime
 
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfgen import canvas
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
+from fpdf import FPDF
+from PIL import Image
 
 # ---------------------------------------------------------------------
-# Кирилиця: вбудовані шрифти reportlab (Helvetica і т.д.) не мають
+# Кирилиця: вбудовані шрифти fpdf (Helvetica і т.д.) не мають
 # кириличних гліфів - український/російський текст просто не
 # з'явиться в PDF. Тому шукаємо системний TTF-шрифт з підтримкою
 # кирилиці і реєструємо його. На Android такий шрифт завжди є
@@ -29,8 +32,6 @@ from reportlab.pdfbase.ttfonts import TTFont
 # і цифри й так відобразяться коректно, кирилиця - ні, але застосунок
 # не впаде).
 # ---------------------------------------------------------------------
-_FONT_NAME = "Helvetica"
-_FONT_BOLD = "Helvetica-Bold"
 _FONT_CANDIDATES = [
     ("/system/fonts/Roboto-Regular.ttf", "/system/fonts/Roboto-Bold.ttf"),
     ("/system/fonts/DroidSans.ttf", "/system/fonts/DroidSans-Bold.ttf"),
@@ -39,38 +40,32 @@ _FONT_CANDIDATES = [
 ]
 
 
-def _register_cyrillic_font():
-    global _FONT_NAME, _FONT_BOLD
+def _find_cyrillic_font():
+    """Повертає (шлях_regular, шлях_bold) першого знайденого шрифту,
+    або (None, None), якщо нічого не знайшлося."""
     for regular_path, bold_path in _FONT_CANDIDATES:
         if os.path.exists(regular_path):
-            try:
-                pdfmetrics.registerFont(TTFont("ReportRegular", regular_path))
-                _FONT_NAME = "ReportRegular"
-                if os.path.exists(bold_path):
-                    pdfmetrics.registerFont(TTFont("ReportBold", bold_path))
-                    _FONT_BOLD = "ReportBold"
-                else:
-                    _FONT_BOLD = "ReportRegular"
-                return
-            except Exception:
-                continue
+            if os.path.exists(bold_path):
+                return regular_path, bold_path
+            return regular_path, regular_path
+    return None, None
 
 
-_register_cyrillic_font()
+PAGE_W = 210.0  # A4, мм
+PAGE_H = 297.0
+MARGIN = 18.0
 
-PAGE_W, PAGE_H = A4
-MARGIN = 18 * mm
 
-
-def _wrap_text(text, font_name, font_size, max_width, c):
+def _wrap_text(text, pdf, max_width):
     """Розбиває текст на рядки так, щоб кожен влазив у max_width
-    (reportlab сам цього не робить - drawString не переносить рядки)."""
+    (аналог reportlab-обгортки; fpdf multi_cell вміє це сам, але тут
+    лишаємо ручний варіант для однакового контролю за висотою рядка)."""
     words = text.split()
     lines = []
     current = ""
     for word in words:
         candidate = f"{current} {word}".strip()
-        if c.stringWidth(candidate, font_name, font_size) <= max_width:
+        if pdf.get_string_width(candidate) <= max_width:
             current = candidate
         else:
             if current:
@@ -99,22 +94,32 @@ def export_frame_to_pdf(
     video_name    - назва вихідного відеофайлу (опційно)
     frame_index   - порядковий номер кадру в списку знахідок (опційно, 1-based)
     """
-    c = canvas.Canvas(output_path, pagesize=A4)
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=MARGIN)
+    pdf.set_margins(MARGIN, MARGIN, MARGIN)
+    pdf.add_page()
+
+    regular_path, bold_path = _find_cyrillic_font()
+    if regular_path:
+        pdf.add_font("Report", "", regular_path)
+        pdf.add_font("Report", "B", bold_path)
+        font_name = "Report"
+    else:
+        font_name = "Helvetica"
+
     content_width = PAGE_W - 2 * MARGIN
-    y = PAGE_H - MARGIN
 
     # --- Заголовок ---
-    c.setFont(_FONT_BOLD, 16)
-    title = "Smart Surveillance - звіт по кадру"
-    c.drawString(MARGIN, y, title)
-    y -= 9 * mm
+    pdf.set_font(font_name, "B", 16)
+    pdf.cell(content_width, 9, "Smart Surveillance - звіт по кадру", new_x="LMARGIN", new_y="NEXT")
 
-    c.setStrokeColorRGB(0.75, 0.75, 0.75)
-    c.line(MARGIN, y, PAGE_W - MARGIN, y)
-    y -= 8 * mm
+    pdf.set_draw_color(190, 190, 190)
+    y = pdf.get_y() + 2
+    pdf.line(MARGIN, y, PAGE_W - MARGIN, y)
+    pdf.set_y(y + 6)
 
     # --- Метадані (час, кадр, відео, дата створення звіту) ---
-    c.setFont(_FONT_NAME, 11)
+    pdf.set_font(font_name, "", 11)
     meta_lines = [f"Час у відео: {time_str}"]
     if frame_index is not None:
         meta_lines.append(f"Кадр №: {frame_index}")
@@ -123,15 +128,14 @@ def export_frame_to_pdf(
     meta_lines.append(f"Звіт створено: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     for line in meta_lines:
-        c.drawString(MARGIN, y, line)
-        y -= 6 * mm
-    y -= 4 * mm
+        pdf.cell(content_width, 6, line, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
 
     # --- Зображення ---
     if image_path and os.path.exists(image_path):
         try:
-            img = ImageReader(image_path)
-            img_w, img_h = img.getSize()
+            with Image.open(image_path) as img:
+                img_w, img_h = img.size
             aspect = img_h / float(img_w)
 
             max_img_w = content_width
@@ -143,35 +147,26 @@ def export_frame_to_pdf(
                 draw_w = draw_h / aspect
 
             x = MARGIN + (content_width - draw_w) / 2
-            y -= draw_h
-            c.drawImage(img, x, y, width=draw_w, height=draw_h, preserveAspectRatio=True)
-            y -= 8 * mm
+            pdf.image(image_path, x=x, y=pdf.get_y(), w=draw_w, h=draw_h)
+            pdf.set_y(pdf.get_y() + draw_h + 8)
         except Exception:
-            c.setFont(_FONT_NAME, 10)
-            c.drawString(MARGIN, y, "[не вдалось завантажити зображення]")
-            y -= 10 * mm
+            pdf.set_font(font_name, "", 10)
+            pdf.cell(content_width, 10, "[не вдалось завантажити зображення]", new_x="LMARGIN", new_y="NEXT")
     else:
-        c.setFont(_FONT_NAME, 10)
-        c.drawString(MARGIN, y, "[зображення відсутнє]")
-        y -= 10 * mm
+        pdf.set_font(font_name, "", 10)
+        pdf.cell(content_width, 10, "[зображення відсутнє]", new_x="LMARGIN", new_y="NEXT")
 
     # --- Опис від ШІ ---
-    c.setFont(_FONT_BOLD, 12)
-    c.drawString(MARGIN, y, "Опис (Gemini):")
-    y -= 7 * mm
+    pdf.set_font(font_name, "B", 12)
+    pdf.cell(content_width, 7, "Опис (Gemini):", new_x="LMARGIN", new_y="NEXT")
 
-    c.setFont(_FONT_NAME, 11)
+    pdf.set_font(font_name, "", 11)
     description = description or "-"
     for paragraph in description.splitlines() or [description]:
-        for line in _wrap_text(paragraph, _FONT_NAME, 11, content_width, c):
-            if y < MARGIN + 10 * mm:
-                c.showPage()
-                y = PAGE_H - MARGIN
-                c.setFont(_FONT_NAME, 11)
-            c.drawString(MARGIN, y, line)
-            y -= 6 * mm
+        for line in _wrap_text(paragraph, pdf, content_width):
+            pdf.cell(content_width, 6, line, new_x="LMARGIN", new_y="NEXT")
 
-    c.save()
+    pdf.output(output_path)
     return output_path
 
 
