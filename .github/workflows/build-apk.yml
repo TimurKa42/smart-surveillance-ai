@@ -30,6 +30,12 @@ jobs:
       - name: Build APK
         working-directory: mobile
         # Добавлено yes | для автоматического принятия лицензий Android SDK
+        # PIP_NO_BINARY=fonttools заставляет pip внутри buildozer/p4a
+        # собирать fontTools из исходников под целевую архитектуру
+        # (arm64-v8a), а не тянуть готовое x86_64 wheel-колесо с PyPI —
+        # именно это было причиной ImportError: EM_X86_64 vs EM_AARCH64
+        env:
+          PIP_NO_BINARY: fonttools
         run: yes | buildozer -v android debug
       - name: Upload APK
         uses: actions/upload-artifact@v4
