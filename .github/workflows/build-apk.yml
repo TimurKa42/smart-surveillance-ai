@@ -28,9 +28,11 @@ jobs:
       - name: Set JAVA_HOME to 17
         run: echo "JAVA_HOME=$JAVA_HOME_17_X64" >> $GITHUB_ENV
       # Кешируем уже скачанные исходники recipe'ов (freetype, sdl2 и т.д.),
-      # чтобы при повторных запусках/ретраях не зависеть от нестабильных
-      # внешних серверов (например, download.savannah.gnu.org, который
-      # периодически отдаёт 502 Bad Gateway)
+      # чтобы при повторных запусках workflow (не путать с попытками
+      # nick-fields/retry внутри одного запуска — между ними кеш не
+      # успевает сохраниться) не зависеть от нестабильных внешних
+      # серверов (например, download.savannah.gnu.org, который
+      # периодически отдаёт 502 Bad Gateway).
       - name: Cache buildozer packages
         uses: actions/cache@v4
         with:
@@ -40,19 +42,55 @@ jobs:
           key: buildozer-packages-${{ hashFiles('mobile/buildozer.spec') }}
           restore-keys: |
             buildozer-packages-
+      # download.savannah.gnu.org периодически отдаёт 502 Bad Gateway на
+      # freetype-2.10.1.tar.gz, из-за чего валятся все попытки подряд.
+      # Скачиваем файл заранее, с большим числом попыток и паузами между
+      # ними, и кладём его именно туда, где его ожидает найти
+      # python-for-android (packages/freetype/<filename>) — тогда сам
+      # buildozer его уже не перекачивает и сразу использует локальную
+      # копию, даже если Savannah в этот момент "лежит".
+      - name: Pre-download freetype (works around savannah 502s)
+        run: |
+          set -e
+          URL="https://download.savannah.gnu.org/releases/freetype/freetype-2.10.1.tar.gz"
+          DEST_DIR="$HOME/.buildozer/android/packages/freetype"
+          DEST_FILE="$DEST_DIR/freetype-2.10.1.tar.gz"
+          mkdir -p "$DEST_DIR"
+          if [ -s "$DEST_FILE" ]; then
+            echo "freetype already present (from cache), skipping download."
+            exit 0
+          fi
+          for i in $(seq 1 10); do
+            echo "Attempt $i: downloading freetype..."
+            if curl -fL --retry 3 --retry-delay 5 -o "$DEST_FILE" "$URL"; then
+              echo "Downloaded successfully."
+              break
+            fi
+            echo "Failed (likely 502), waiting before retry..."
+            rm -f "$DEST_FILE"
+            sleep 20
+          done
+          if [ ! -s "$DEST_FILE" ]; then
+            echo "Could not download freetype after multiple attempts, continuing anyway (buildozer will try itself)."
+          fi
       - name: Build APK
         # Добавлено yes | для автоматического принятия лицензий Android SDK
         # PIP_NO_BINARY=fonttools заставляет pip внутри buildozer/p4a
         # собирать fontTools из исходников под целевую архитектуру
         # (arm64-v8a), а не тянуть готовое x86_64 wheel-колесо с PyPI —
         # именно это было причиной ImportError: EM_X86_64 vs EM_AARCH64
+        #
+        # max_attempts/retry_wait_seconds увеличены: внешние серверы вроде
+        # download.savannah.gnu.org иногда "лежат" по 5-10+ минут, а не
+        # секунды, так что 3 попытки с 30-секундной паузой не всегда
+        # успевают дождаться восстановления.
         env:
           PIP_NO_BINARY: fonttools
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 45
-          max_attempts: 3
-          retry_wait_seconds: 30
+          max_attempts: 5
+          retry_wait_seconds: 90
           command: cd mobile && yes | buildozer -v android debug
       - name: Upload APK
         uses: actions/upload-artifact@v4
