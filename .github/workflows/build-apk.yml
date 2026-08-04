@@ -24,7 +24,13 @@ jobs:
             autoconf automake libtool pkg-config \
             zip
       - name: Install Buildozer and Cython
-        run: pip install --upgrade buildozer cython==0.29.36
+        # meson, meson-python и ninja нужны отдельно: recipe numpy (1.26.5,
+        # на который запинен p4a.commit) собирается через build backend
+        # "mesonpy", и если он не установлен в хостовом Python, сборка
+        # numpy падает с "Backend 'mesonpy' is not available." ещё до
+        # начала компиляции — это не сетевая проблема, а отсутствующая
+        # зависимость.
+        run: pip install --upgrade buildozer cython==0.29.36 meson meson-python ninja
       - name: Set JAVA_HOME to 17
         run: echo "JAVA_HOME=$JAVA_HOME_17_X64" >> $GITHUB_ENV
       # Кешируем уже скачанные исходники recipe'ов (freetype, sdl2 и т.д.),
