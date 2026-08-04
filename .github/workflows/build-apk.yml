@@ -27,8 +27,20 @@ jobs:
         run: pip install --upgrade buildozer cython==0.29.36
       - name: Set JAVA_HOME to 17
         run: echo "JAVA_HOME=$JAVA_HOME_17_X64" >> $GITHUB_ENV
+      # Кешируем уже скачанные исходники recipe'ов (freetype, sdl2 и т.д.),
+      # чтобы при повторных запусках/ретраях не зависеть от нестабильных
+      # внешних серверов (например, download.savannah.gnu.org, который
+      # периодически отдаёт 502 Bad Gateway)
+      - name: Cache buildozer packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer/android/packages
+            mobile/.buildozer/android/platform/build-*/packages
+          key: buildozer-packages-${{ hashFiles('mobile/buildozer.spec') }}
+          restore-keys: |
+            buildozer-packages-
       - name: Build APK
-        working-directory: mobile
         # Добавлено yes | для автоматического принятия лицензий Android SDK
         # PIP_NO_BINARY=fonttools заставляет pip внутри buildozer/p4a
         # собирать fontTools из исходников под целевую архитектуру
@@ -36,7 +48,12 @@ jobs:
         # именно это было причиной ImportError: EM_X86_64 vs EM_AARCH64
         env:
           PIP_NO_BINARY: fonttools
-        run: yes | buildozer -v android debug
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 45
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: cd mobile && yes | buildozer -v android debug
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
