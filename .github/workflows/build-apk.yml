@@ -47,21 +47,26 @@ jobs:
           URL="https://download.savannah.gnu.org/releases/freetype/freetype-2.10.1.tar.gz"
           DEST_DIR="$GITHUB_WORKSPACE/mobile/.buildozer/android/platform/build-arm64-v8a/packages/freetype"
           DEST_FILE="$DEST_DIR/freetype-2.10.1.tar.gz"
+          MARK_FILE="$DEST_DIR/.mark-freetype-2.10.1.tar.gz"
           mkdir -p "$DEST_DIR"
-          if [ -s "$DEST_FILE" ]; then
+          
+          if [ -s "$DEST_FILE" ] && [ -f "$MARK_FILE" ]; then
             echo "freetype already present (from cache), skipping download."
             exit 0
           fi
+          
           for i in $(seq 1 10); do
             echo "Attempt $i: downloading freetype..."
             if curl -fL --retry 3 --retry-delay 5 -o "$DEST_FILE" "$URL"; then
               echo "Downloaded successfully."
+              touch "$MARK_FILE"
               break
             fi
             echo "Failed (likely 502), waiting before retry..."
             rm -f "$DEST_FILE"
             sleep 20
           done
+          
           if [ ! -s "$DEST_FILE" ]; then
             echo "Could not download freetype after multiple attempts, continuing anyway (buildozer will try itself)."
           fi
