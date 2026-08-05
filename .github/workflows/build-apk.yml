@@ -22,7 +22,8 @@ jobs:
             libffi-dev libssl-dev \
             zlib1g-dev libncurses5-dev libtinfo5 \
             autoconf automake libtool pkg-config \
-            zip
+            zip liblzma-dev libbz2-dev libsqlite3-dev \
+            cmake ninja-build
       - name: Install Buildozer and Cython
         run: pip install --upgrade buildozer cython==0.29.36 meson meson-python ninja
       - name: Set JAVA_HOME to 17
