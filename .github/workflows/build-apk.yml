@@ -34,9 +34,12 @@ jobs:
           path: |
             ~/.buildozer/android/packages
             mobile/.buildozer/android/platform/build-*/packages
-          key: buildozer-packages-${{ hashFiles('mobile/buildozer.spec') }}
+          # Ключ помечен -ndk27, чтобы не подхватить старый кэш,
+          # собранный под NDK 25c со старым пином p4a — он несовместим
+          # с новым NDK 27b и текущим (develop) recipe numpy.
+          key: buildozer-packages-ndk27-${{ hashFiles('mobile/buildozer.spec') }}
           restore-keys: |
-            buildozer-packages-
+            buildozer-packages-ndk27-
       # download.savannah.gnu.org периодически отдаёт 502 на freetype-2.10.1.tar.gz.
       # Кладём файл заранее ИМЕННО туда, где его ищет python-for-android:
       # $GITHUB_WORKSPACE/mobile/.buildozer/android/platform/build-arm64-v8a/packages/freetype/
@@ -49,12 +52,10 @@ jobs:
           DEST_FILE="$DEST_DIR/freetype-2.10.1.tar.gz"
           MARK_FILE="$DEST_DIR/.mark-freetype-2.10.1.tar.gz"
           mkdir -p "$DEST_DIR"
-
           if [ -s "$DEST_FILE" ] && [ -f "$MARK_FILE" ]; then
             echo "freetype already present (from cache), skipping download."
             exit 0
           fi
-
           for i in $(seq 1 10); do
             echo "Attempt $i: downloading freetype..."
             if curl -fL --retry 3 --retry-delay 5 -o "$DEST_FILE" "$URL"; then
@@ -66,20 +67,12 @@ jobs:
             rm -f "$DEST_FILE"
             sleep 20
           done
-
           if [ ! -s "$DEST_FILE" ]; then
             echo "Could not download freetype after multiple attempts, continuing anyway (buildozer will try itself)."
           fi
       - name: Build APK
         env:
           PIP_NO_BINARY: fonttools
-          # Фикс ошибки "Cannot import 'mesonpy'" при сборке numpy:
-          # изолированный venv, который python-for-android создаёт
-          # для сборки numpy (meson-python backend), периодически
-          # не может корректно установить/импортировать meson-python
-          # внутри hostpython3. Отключаем build isolation, чтобы
-          # использовались уже установленные в окружении Cython/meson/ninja.
-          PIP_NO_BUILD_ISOLATION: "1"
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 45
