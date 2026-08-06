@@ -27,18 +27,18 @@ android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBR
 
 android.api = 35
 android.minapi = 24
-android.ndk = 25c
+android.ndk = 27b
 android.archs = arm64-v8a
 
-# --- Временный пин python-for-android ---
-# В master/develop p4a recipe numpy обновили до v2.3.0 (PR #3164,
-# "support ndk28c"), и её C++ исходники (unique.cpp) не собираются
-# компилятором из NDK 25c ("no template named 'unordered_map'").
-# Пин на коммит перед этим PR: там numpy recipe = v1.26.5, собирается
-# нормально под NDK 25c. Когда апстрим почистит recipe под старые NDK
-# (или сам перейдёшь на NDK 28c) — этот блок можно убрать.
+# --- p4a: используем актуальный develop без пина ---
+# Раньше был запинен старый коммит p4a (a8f2ca1c...), т.к. recipe
+# numpy v2.3.0 (PR #3164, "support ndk28c") не собирался под NDK 25c
+# ("no template named 'unordered_map'"). Вместо отката p4a назад
+# (что вскрыло другой баг: старый recipe numpy 1.26.5 падал с
+# "Cannot import 'mesonpy'" — isolated build не мог поставить
+# meson-python) — поднимаем NDK до 27b, под которым актуальный
+# recipe numpy из develop собирается нормально.
 p4a.branch = develop
-p4a.commit = a8f2ca1c5b1bb6696b47fdf2c052285e116e0ebe
 
 [buildozer]
 log_level = 2
