@@ -13,6 +13,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip'
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -25,7 +26,7 @@ jobs:
             zip liblzma-dev libbz2-dev libsqlite3-dev \
             cmake ninja-build
       - name: Install Buildozer and Cython
-        run: pip install --upgrade buildozer cython==0.29.36 meson meson-python ninja
+        run: pip install buildozer==1.5.0 cython==0.29.36 meson meson-python ninja
       - name: Set JAVA_HOME to 17
         run: echo "JAVA_HOME=$JAVA_HOME_17_X64" >> $GITHUB_ENV
       - name: Cache buildozer packages
@@ -36,21 +37,28 @@ jobs:
             mobile/.buildozer/android/platform/build-*/packages
           # Ключ помечен -ndk27, чтобы не подхватить старый кэш,
           # собранный под NDK 25c со старым пином p4a — он несовместим
-          # с новым NDK 27b и текущим (develop) recipe numpy.
+          # с новым NDK 27b и текущим (закреплённым) recipe numpy.
           key: buildozer-packages-ndk27-${{ hashFiles('mobile/buildozer.spec') }}
           restore-keys: |
             buildozer-packages-ndk27-
-      # download.savannah.gnu.org периодически отдаёт 502 на freetype-2.10.1.tar.gz.
+      # download.savannah.gnu.org периодически отдаёт 502 на freetype tar.gz
+      # (это редиректор на "ближайшее зеркало" — сам редирект и шалит).
       # Кладём файл заранее ИМЕННО туда, где его ищет python-for-android:
       # $GITHUB_WORKSPACE/mobile/.buildozer/android/platform/build-arm64-v8a/packages/freetype/
-      # (не ~/.buildozer/... — там p4a пакеты не ищет).
+      # (не ~/.buildozer/... — там p4a пакеты не ищет), и берём его с
+      # download-mirror.savannah.gnu.org — прямого хоста без редирект-прослойки.
+      #
+      # ВАЖНО: версия freetype (2.14.1) должна совпадать с той, что просит
+      # текущий закреплённый p4a.commit в buildozer.spec. Если обновляешь
+      # p4a.commit — проверь лог сборки на строку "Downloading freetype from ..."
+      # и, если версия там другая, поправь её и здесь.
       - name: Pre-download freetype (works around savannah 502s)
         run: |
           set -e
-          URL="https://download.savannah.gnu.org/releases/freetype/freetype-2.10.1.tar.gz"
+          URL="https://download-mirror.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.gz"
           DEST_DIR="$GITHUB_WORKSPACE/mobile/.buildozer/android/platform/build-arm64-v8a/packages/freetype"
-          DEST_FILE="$DEST_DIR/freetype-2.10.1.tar.gz"
-          MARK_FILE="$DEST_DIR/.mark-freetype-2.10.1.tar.gz"
+          DEST_FILE="$DEST_DIR/freetype-2.14.1.tar.gz"
+          MARK_FILE="$DEST_DIR/.mark-freetype-2.14.1.tar.gz"
           mkdir -p "$DEST_DIR"
           if [ -s "$DEST_FILE" ] && [ -f "$MARK_FILE" ]; then
             echo "freetype already present (from cache), skipping download."
@@ -63,7 +71,7 @@ jobs:
               touch "$MARK_FILE"
               break
             fi
-            echo "Failed (likely 502), waiting before retry..."
+            echo "Failed, waiting before retry..."
             rm -f "$DEST_FILE"
             sleep 20
           done
