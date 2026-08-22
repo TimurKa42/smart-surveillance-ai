@@ -37,6 +37,7 @@ android.archs = arm64-v8a
 # Чтобы рецепты (freetype/numpy/opencv/...) больше не менялись
 # у нас под ногами без предупреждения — фиксируем конкретный коммит.
 # Обновлять сознательно: смотреть `git ls-remote <repo> develop`.
+p4a.hook = %(source.dir)s/p4a_hook.py
 p4a.branch = develop
 p4a.commit = 7af1d1325ef460def993cc7871c43d04bc877a94
 [buildozer]
