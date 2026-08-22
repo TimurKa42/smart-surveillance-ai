@@ -13,9 +13,13 @@ fullscreen = 0
 icon.filename = %(source.dir)s/icon.png
 icon.adaptive_foreground.filename = %(source.dir)s/icon_fg.png
 icon.adaptive_background.filename = %(source.dir)s/icon_bg.png
-# Цвет фона заставки при запуске (совпадает с фоном иконки),
-# чтобы не было белой рамки/вспышки на старте
-android.presplash_color = #061533
+# Цвет фона рантайм Loading-экрана (маскот Kivy рисуется поверх него
+# в PythonActivity.java, картинка квадратная — сверху/снизу видны
+# отступы в этот цвет). Чёрный, чтобы не было синих полос.
+# Не путать с android:windowSplashScreenBackground — тот системный
+# сплэш (Android 12+) красится отдельно через p4a_hook.py в навy,
+# под цвет иконки.
+android.presplash_color = #000000
 android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE
 android.api = 35
 android.minapi = 24
