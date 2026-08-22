@@ -1654,10 +1654,22 @@ class MainScreen(Screen):
         self.ids.report_list.clear_widgets()
 
         if not results:
-            self.ids.report_list.add_widget(Label(
+            nothing_found_label = Label(
                 text=app.t("nothing_found_list"), color=app.palette["text_muted"],
-                size_hint_y=None, height=dp(40),
-            ))
+                size_hint_y=None, halign="left", valign="top",
+            )
+            # Без text_size Label не переносить рядки і малює весь текст
+            # як одну картинку природної ширини - у вузькій лівій колонці
+            # (0.38 ширини екрана) довгий рядок вилазив за межі ScrollView
+            # і обрізався замість переносу на новий рядок.
+            # text_size прив'язуємо до поточної ширини колонки, а висоту
+            # блоку - до texture_size, щоб він сам розтягувався вниз під
+            # потрібну кількість рядків після переносу.
+            nothing_found_label.bind(
+                width=lambda inst, w: setattr(inst, "text_size", (w, None)),
+                texture_size=lambda inst, ts: setattr(inst, "height", ts[1]),
+            )
+            self.ids.report_list.add_widget(nothing_found_label)
             self.ids.description_label.text = app.t("nothing_found_description", query=prompt_text)
             self.ids.screenshot_image.source = ""
             self.ids.screenshot_image.opacity = 0
